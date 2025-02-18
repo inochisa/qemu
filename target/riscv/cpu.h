@@ -337,6 +337,7 @@ struct CPUArchState {
     target_ulong htval;
     target_ulong htinst;
     target_ulong hgatp;
+    target_ulong hssatp;
     target_ulong hgeie;
     target_ulong hgeip;
     uint64_t htimedelta;
@@ -610,6 +611,21 @@ int riscv_cpu_max_xlen(RISCVCPUClass *mcc);
 bool riscv_cpu_option_set(const char *optname);
 
 #ifndef CONFIG_USER_ONLY
+struct RISCVShadowMemRes {
+	int i;
+	int ptshift;
+    hwaddr ppn;
+    target_ulong pte;
+};
+
+int riscv_get_shadow_physical_address(CPURISCVState *env,
+									  struct RISCVShadowMemRes *memres,
+									  int *ret_prot, vaddr addr,
+									  target_ulong *fault_pte_addr,
+									  bool flush, bool is_debug);
+void riscv_cpu_flush_all_valid_map(CPURISCVState *env);
+void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr);
+void riscv_cpu_flush_spte_gptr(CPURISCVState *env);
 void riscv_cpu_do_interrupt(CPUState *cpu);
 void riscv_isa_write_fdt(RISCVCPU *cpu, void *fdt, char *nodename);
 void riscv_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,

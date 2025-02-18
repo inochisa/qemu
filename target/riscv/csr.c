@@ -4292,7 +4292,14 @@ static RISCVException write_satp(CPURISCVState *env, int csrno,
         return RISCV_EXCP_NONE;
     }
 
+	target_ulong old_satp = env->satp;
+
     env->satp = legalize_xatp(env, env->satp, val);
+
+	if (env->virt_enabled && old_satp != env->satp) {
+		riscv_cpu_flush_all_valid_map(env);
+	}
+
     return RISCV_EXCP_NONE;
 }
 
@@ -4905,6 +4912,20 @@ static RISCVException write_hgatp(CPURISCVState *env, int csrno,
     return RISCV_EXCP_NONE;
 }
 
+static RISCVException read_hssatp(CPURISCVState *env, int csrno,
+                                  target_ulong *val)
+{
+    *val = env->hssatp;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_hssatp(CPURISCVState *env, int csrno,
+                                   target_ulong val)
+{
+    env->hssatp = legalize_xatp(env, env->hssatp, val);
+    return RISCV_EXCP_NONE;
+}
+
 static RISCVException read_htimedelta(CPURISCVState *env, int csrno,
                                       target_ulong *val)
 {
@@ -5190,7 +5211,14 @@ static RISCVException read_vsatp(CPURISCVState *env, int csrno,
 static RISCVException write_vsatp(CPURISCVState *env, int csrno,
                                   target_ulong val, uintptr_t ra)
 {
+	target_ulong old_satp = env->vsatp;
+
     env->vsatp = legalize_xatp(env, env->vsatp, val);
+
+	if (!env->virt_enabled && old_satp != env->vsatp) {
+		riscv_cpu_flush_all_valid_map(env);
+	}
+
     return RISCV_EXCP_NONE;
 }
 
@@ -6026,6 +6054,8 @@ riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_HGEIP]       = { "hgeip",       hmode,   read_hgeip,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HGATP]       = { "hgatp",       hgatp,   read_hgatp,   write_hgatp,
+                          .min_priv_ver = PRIV_VERSION_1_12_0                },
+    [CSR_HSSATP]      = { "hssatp",      hgatp,   read_hssatp,  write_hssatp,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HTIMEDELTA]  = { "htimedelta",  hmode,   read_htimedelta,
                           write_htimedelta,

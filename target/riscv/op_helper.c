@@ -600,6 +600,78 @@ void helper_hyp_gvma_tlb_flush(CPURISCVState *env)
     helper_hyp_tlb_flush(env);
 }
 
+static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
+						  target_ulong flush_vaddr, bool background)
+{
+    hwaddr vbase;
+    int vm, asid;
+	int ret_prot;
+
+	if (env->hssatp == 0) {
+		return;
+	}
+
+    if (background) {
+		if (riscv_cpu_mxl(env) == MXL_RV32) {
+			vbase = (hwaddr)get_field(env->vsatp, SATP32_PPN) << PGSHIFT;
+			vm = get_field(env->vsatp, SATP32_MODE);
+			asid = get_field(env->vsatp, SATP32_ASID);
+		} else {
+			vbase = (hwaddr)get_field(env->vsatp, SATP64_PPN) << PGSHIFT;
+			vm = get_field(env->vsatp, SATP64_MODE);
+			asid = get_field(env->vsatp, SATP64_ASID);
+		}
+    } else {
+		if (riscv_cpu_mxl(env) == MXL_RV32) {
+			vbase = (hwaddr)get_field(env->satp, SATP32_PPN) << PGSHIFT;
+			vm = get_field(env->satp, SATP32_MODE);
+			asid = get_field(env->satp, SATP32_ASID);
+		} else {
+			vbase = (hwaddr)get_field(env->satp, SATP64_PPN) << PGSHIFT;
+			vm = get_field(env->satp, SATP64_MODE);
+			asid = get_field(env->satp, SATP64_ASID);
+		}
+	}
+
+	/* early return if not fill vsatp */
+	if (vm == VM_1_10_MBARE || vbase == 0) {
+		return;
+	}
+
+	/* early return if not match */
+	if (flush_asid != 0 && flush_asid != asid) {
+		return;
+	}
+
+	if (flush_vaddr == 0) {
+		riscv_cpu_flush_all_valid_map(env);
+		return;
+	}
+
+	riscv_get_shadow_physical_address(env, NULL, &ret_prot, vbase, NULL, true, false);
+}
+
+
+void helper_gst_spte_flush(CPURISCVState *env, target_ulong asid,
+						   target_ulong vaddr)
+{
+	if (env->hssatp == 0 || !env->virt_enabled) {
+		return;
+	}
+
+	do_spte_flush(env, asid, vaddr, false);
+}
+
+void helper_hyp_spte_flush(CPURISCVState *env, target_ulong asid,
+						   target_ulong vaddr)
+{
+	if (env->hssatp == 0  || env->virt_enabled) {
+		return;
+	}
+
+	do_spte_flush(env, asid, vaddr, true);
+}
+
 static int check_access_hlsv(CPURISCVState *env, bool x, uintptr_t ra)
 {
     if (env->priv == PRV_M) {

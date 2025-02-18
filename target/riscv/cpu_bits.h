@@ -271,6 +271,7 @@
 #define CSR_HTINST          0x64A
 #define CSR_HGEIP           0xE12
 #define CSR_HGATP           0x680
+#define CSR_HSSATP          0x681
 #define CSR_HTIMEDELTA      0x605
 #define CSR_HTIMEDELTAH     0x615
 
@@ -673,6 +674,7 @@ typedef enum {
 #define PTE_A               0x040 /* Accessed */
 #define PTE_D               0x080 /* Dirty */
 #define PTE_SOFT            0x300 /* Reserved for Software */
+#define PTE_SV              0x1000000000000000ULL /* Shadow valid */
 #define PTE_PBMT            0x6000000000000000ULL /* Page-based memory types */
 #define PTE_N               0x8000000000000000ULL /* NAPOT translation */
 #define PTE_RESERVED        0x1FC0000000000000ULL /* Reserved bits */

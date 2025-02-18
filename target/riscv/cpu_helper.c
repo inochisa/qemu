@@ -1162,6 +1162,200 @@ static bool check_svukte_addr(CPURISCVState *env, vaddr addr)
     return !high_bit;
 }
 
+#define SEPTE_OFFSET		TARGET_PAGE_SIZE
+#define SPTE_GPTE_PTR		(SEPTE_OFFSET + 0x000)
+#define SPTE_VALID_MAP		(SEPTE_OFFSET + 0x200)
+#define SPTE_GLOBAL_MAP		(SEPTE_OFFSET + 0x400)
+
+#define riscv_cpu_get_field(env, csr, mask32, mask64)	\
+	((riscv_cpu_mxl(env) == MXL_RV32) ?				\
+	 (get_field((csr), (mask32))) : (get_field((csr), (mask32))))
+
+static inline target_ulong riscv_cpu_load(CPURISCVState *env, hwaddr addr,
+										  MemTxAttrs attrs, MemTxResult *result)
+{
+    CPUState *cs = env_cpu(env);
+
+	if (riscv_cpu_mxl(env) == MXL_RV32) {
+		return address_space_ldl(cs->as, addr, attrs, result);
+	} else {
+		return address_space_ldq(cs->as, addr, attrs, result);
+	}
+}
+
+static inline void riscv_cpu_store(CPURISCVState *env, hwaddr addr,
+								   target_ulong val,
+								   MemTxAttrs attrs, MemTxResult *result)
+{
+    CPUState *cs = env_cpu(env);
+
+	if (riscv_cpu_mxl(env) == MXL_RV32) {
+		address_space_stl(cs->as, addr, val, attrs, result);
+	} else {
+		address_space_stq(cs->as, addr, val, attrs, result);
+	}
+}
+
+static inline void riscv_cpu_update(CPURISCVState *env, hwaddr addr,
+									target_ulong val, target_ulong mask,
+									MemTxAttrs attrs, MemTxResult *result)
+{
+	target_ulong tmp;
+
+	tmp = riscv_cpu_load(env, addr, attrs, result);
+
+	if (*result != MEMTX_OK) {
+		return;
+	}
+
+	tmp &= ~mask;
+	tmp |= val;
+
+	riscv_cpu_store(env, addr, tmp, attrs, result);
+}
+
+static inline target_ulong get_spte_info(CPURISCVState *env,
+										 hwaddr base, hwaddr offset,
+										 MemTxAttrs attrs, MemTxResult *res)
+{
+	hwaddr espte_addr = base + offset;
+
+	return riscv_cpu_load(env, espte_addr, attrs, res);
+}
+
+static inline void set_spte_info(CPURISCVState *env,
+								 hwaddr base, hwaddr offset, target_ulong val,
+								 MemTxAttrs attrs, MemTxResult *res)
+{
+	hwaddr espte_addr = base + offset;
+
+	riscv_cpu_store(env, espte_addr, val, attrs, res);
+}
+
+static inline void update_spte_info(CPURISCVState *env, hwaddr base,
+									hwaddr offset,
+									target_ulong val, target_ulong mask,
+									MemTxAttrs attrs, MemTxResult *res)
+{
+	hwaddr espte_addr = base + offset;
+
+	riscv_cpu_update(env, espte_addr, val, mask, attrs, res);
+}
+
+
+static void spte_set_validmap(CPURISCVState *env, hwaddr base, target_ulong idx,
+							  bool set, MemTxAttrs attrs, MemTxResult *res)
+{
+	int size = riscv_cpu_xlen(env);
+	int offset = (idx / size) * size;
+	target_ulong mask = 1 << (idx % size);
+	target_ulong value = set ? mask : 0;
+
+	update_spte_info(env, base, SPTE_VALID_MAP + offset,
+					 value, mask, attrs, res);
+}
+
+static void spte_set_valid(CPURISCVState *env, hwaddr base, target_ulong idx,
+						   MemTxAttrs attrs, MemTxResult *res)
+{
+	spte_set_validmap(env, base, idx, true, attrs, res);
+}
+
+static void spte_set_invalid(CPURISCVState *env, hwaddr base, target_ulong idx,
+							 MemTxAttrs attrs, MemTxResult *res)
+{
+	spte_set_validmap(env, base, idx, false, attrs, res);
+}
+
+static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong idx,
+								MemTxAttrs attrs, MemTxResult *res)
+{
+	target_ulong value;
+	int size = riscv_cpu_xlen(env);
+	int offset = (idx / size) * size;
+
+	value = get_spte_info(env, base, SPTE_VALID_MAP + offset,
+						  attrs, res);
+
+	if (*res != MEMTX_OK) {
+		return false;
+	}
+
+	return value & (1 << (idx % size));
+}
+
+static bool spte_get_gpte(CPURISCVState *env, hwaddr base,
+						  MemTxAttrs attrs, MemTxResult *res)
+{
+	return get_spte_info(env, base, SPTE_GPTE_PTR, attrs, res);
+}
+
+static void spte_set_gpte(CPURISCVState *env, hwaddr base, target_ulong gpte,
+						  MemTxAttrs attrs, MemTxResult *res)
+{
+	set_spte_info(env, base, SPTE_GPTE_PTR, gpte, attrs, res);
+}
+
+static void *spte_map_extra_page(CPURISCVState *env, hwaddr base)
+{
+    CPUState *cs = env_cpu(env);
+	hwaddr l = TARGET_PAGE_SIZE, addr1;
+	MemoryRegion *mr;
+
+	mr = address_space_translate(cs->as, base + SEPTE_OFFSET, &addr1, &l,
+								 false, MEMTXATTRS_UNSPECIFIED);
+
+	return qemu_map_ram_ptr(mr->ram_block, addr1);
+}
+
+void riscv_cpu_flush_all_valid_map(CPURISCVState *env)
+{
+	hwaddr base = riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+
+	if (base == 0) {
+		return;
+	}
+
+	void *pte = spte_map_extra_page(env, base);
+	int size = TARGET_PAGE_SIZE / riscv_cpu_xlen(env) / 8;
+
+	// posion the valid map
+	// memcpy(pte + SPTE_VALID_MAP, pte + SPTE_GLOBAL_MAP, size);
+	memset(pte + SPTE_VALID_MAP, 0x00, size);
+}
+
+void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr)
+{
+    // CPUState *cs = env_cpu(env);
+	// int size;
+
+	// TODO: setup init and call fence
+}
+
+static void posion_spte(CPURISCVState *env, hwaddr base, MemTxAttrs attrs)
+{
+	int size = TARGET_PAGE_SIZE / riscv_cpu_xlen(env);
+	void *pte = spte_map_extra_page(env, base);
+
+	// posion the valid map
+	memset(pte + SPTE_VALID_MAP, 0x00, size);
+
+	// posion the guest ptr
+	*(target_ulong *)(pte + SPTE_GPTE_PTR) = 0x0;
+}
+
+static void mark_spte_is_huge(CPURISCVState *env, hwaddr addr,
+							  MemTxAttrs attrs, MemTxResult *res)
+{
+	riscv_cpu_update(env, addr, PTE_V, PTE_V, attrs, res);
+}
+
+static void fill_spte_leaf(CPURISCVState *env, hwaddr addr, target_ulong ppn,
+						   MemTxAttrs attrs, MemTxResult *res)
+{
+	riscv_cpu_store(env, addr, ppn, attrs, res);
+}
+
 /*
  * get_physical_address - get the physical address for this virtual address
  *
@@ -1320,7 +1514,26 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     hwaddr pte_addr;
     int i;
 
- restart:
+	// TODO: enter shadow translate
+    if (first_stage && two_stage && env->virt_enabled) {
+		struct RISCVShadowMemRes memres;
+
+		int ret = riscv_get_shadow_physical_address(env, &memres, ret_prot,
+													addr, fault_pte_addr,
+													false, is_debug);
+
+		if (ret != TRANSLATE_SUCCESS) {
+			return ret;
+		}
+
+		// TODO: fill memres
+		i = memres.i;
+		ptshift = memres.ptshift;
+		pte = memres.pte;
+		ppn = memres.ppn;
+    }
+
+restart:
     for (i = 0; i < levels; i++, ptshift -= ptidxbits) {
         target_ulong idx;
         if (i == 0) {
@@ -1654,6 +1867,396 @@ static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
     env->badaddr = address;
     env->two_stage_lookup = two_stage;
     env->two_stage_indirect_lookup = two_stage_indirect;
+}
+
+void riscv_cpu_flush_spte_gptr(CPURISCVState *env)
+{
+    MemTxResult res;
+    MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
+	int ret;
+	hwaddr base, vbase;
+	int vbase_prot;
+	hwaddr sbase;
+
+	if (env->virt_enabled) {
+		base = (hwaddr)riscv_cpu_get_field(env, env->satp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+	} else {
+		base = (hwaddr)riscv_cpu_get_field(env, env->vsatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+	}
+
+	sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+
+	ret = get_physical_address(env, &vbase, &vbase_prot, base,
+							   NULL, MMU_DATA_LOAD,
+							   MMUIdx_U, false, true, false, false);
+	if (ret != TRANSLATE_SUCCESS) {
+        raise_mmu_exception(env, base, MMU_DATA_LOAD, ret == TRANSLATE_PMP_FAIL,
+                            false, true, true);
+		return;
+	}
+
+	set_spte_info(env, sbase, SPTE_GPTE_PTR, vbase, attrs, &res);
+	if (res != MEMTX_OK) {
+		// TODO: trigger exception
+	}
+}
+
+/**
+ * ppn: ppn of the pte
+ * pte: current pte
+ * i: which
+ * ptshift: bit shift
+ */
+int riscv_get_shadow_physical_address(CPURISCVState *env,
+									  struct RISCVShadowMemRes *memres,
+									  int *ret_prot, vaddr addr,
+									  target_ulong *fault_pte_addr,
+									  bool flush, bool is_debug)
+{
+    MemTxResult res;
+    MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
+    hwaddr base;
+    int levels, ptidxbits, ptesize, vm;
+    hwaddr ppn;
+
+	base = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+	// XXX: may be used for satp/vsatp
+	if (!env->virt_enabled) {
+		vm = riscv_cpu_get_field(env, env->vsatp, SATP32_MODE, SATP64_MODE);
+	} else {
+		vm = riscv_cpu_get_field(env, env->satp, SATP32_MODE, SATP64_MODE);
+	}
+	vm = riscv_cpu_get_field(env, env->hssatp, SATP32_MODE, SATP64_MODE);
+
+    switch (vm) {
+    case VM_1_10_SV32:
+      levels = 1; ptidxbits = 10; ptesize = 4; break;
+    case VM_1_10_SV39:
+      levels = 2; ptidxbits = 9; ptesize = 8; break;
+    case VM_1_10_SV48:
+      levels = 3; ptidxbits = 9; ptesize = 8; break;
+    case VM_1_10_SV57:
+      levels = 4; ptidxbits = 9; ptesize = 8; break;
+    case VM_1_10_MBARE:
+      return TRANSLATE_G_STAGE_FAIL;
+    default:
+      g_assert_not_reached();
+    }
+
+    CPUState *cs = env_cpu(env);
+    int sxlen = 16 << riscv_cpu_sxl(env);
+    int sxlen_bytes = sxlen / 8;
+
+    bool pbmte = env->menvcfg & MENVCFG_PBMTE;
+	if (env->virt_enabled) {
+        pbmte = pbmte && (env->henvcfg & HENVCFG_PBMTE);
+	}
+
+    int ptshift = levels * ptidxbits;
+    target_ulong sppn[6] = {0, 0, 0, 0, 0, 0};
+	target_ulong idx;
+    target_ulong spte;
+	target_ulong gpte = 0;
+    hwaddr pte_addr, rgpte;
+    int i;
+
+    for (i = 0; i < levels; i++, ptshift -= ptidxbits) {
+		sppn[i] = base;
+		idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
+        pte_addr = base + idx * ptesize;
+
+        int pmp_prot;
+        int pmp_ret = get_physical_address_pmp(env, &pmp_prot, pte_addr,
+                                               sxlen_bytes,
+                                               MMU_DATA_LOAD, PRV_S);
+        if (pmp_ret != TRANSLATE_SUCCESS) {
+            return TRANSLATE_PMP_FAIL;
+        }
+
+		spte = riscv_cpu_load(env, pte_addr, attrs, &res);
+
+        if (res != MEMTX_OK) {
+            return TRANSLATE_FAIL;
+        }
+
+        if (riscv_cpu_sxl(env) == MXL_RV32) {
+            ppn = spte >> PTE_PPN_SHIFT;
+        } else {
+            ppn = (spte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+        }
+
+		target_ulong new_spte = spte;
+
+		if (flush) {
+			hwaddr rgpt = spte_get_gpte(env, base, attrs, &res);
+
+			if (res != MEMTX_OK) {
+				return TRANSLATE_FAIL;
+			}
+
+            int vgpte_prot;
+            hwaddr vgpte;
+
+			int gpte_ret = get_physical_address(env, &vgpte, &vgpte_prot,
+												rgpt, NULL, MMU_DATA_LOAD,
+												MMUIdx_U, false, true,
+												is_debug, false);
+
+			// TODO: figure whether is G-stage error
+            if (gpte_ret != TRANSLATE_SUCCESS) {
+                if (fault_pte_addr) {
+                    *fault_pte_addr = (rgpt + idx * ptesize) >> 2;
+                }
+                return TRANSLATE_G_STAGE_FAIL;
+            }
+
+			hwaddr rpte_addr = vgpte + idx * ptesize;;
+
+			rgpte = riscv_cpu_load(env, rpte_addr, attrs, &res);
+			if (res != MEMTX_OK) {
+				return TRANSLATE_FAIL;
+			}
+
+			/* ignore invalid/deleted gpte */
+			if (!(rgpte & PTE_V)) {
+				spte_set_invalid(env, base, idx, attrs, &res);
+				return TRANSLATE_SUCCESS;
+			}
+
+			/* do a refill if is a large pte */
+			if (rgpte & (PTE_R | PTE_W | PTE_X)) {
+				spte_set_invalid(env, base, idx, attrs, &res);
+				goto out;
+			}
+
+			/* Inner PTE, just return */
+			if (rgpte & (PTE_D | PTE_A | PTE_U | PTE_ATTR)) {
+				return TRANSLATE_SUCCESS;
+			}
+		}
+
+out:
+		if (!check_spte_is_valid(env, base, idx, attrs, &res)) {
+			if (i == (levels - 1)) { /* is leaf */
+				new_spte = 0;
+
+				/* trigger refill */
+				goto refill;
+			} else if (ppn) { /* if already valid */
+				posion_spte(env, ppn << PGSHIFT, attrs);
+
+				spte_set_valid(env, base, idx, attrs, &res);
+
+				new_spte &= ~(PTE_R | PTE_W | PTE_X | PTE_V);
+			} else { /* empty pte */
+				/* TODO: trigger shadow page fault */
+			}
+		}
+
+		if(new_spte & PTE_V) { // is huge pte
+			base = spte_get_gpte(env, sppn[i], attrs, &res);
+
+			if (res != MEMTX_OK) {
+				return TRANSLATE_FAIL;
+			}
+
+			goto leaf;
+		}
+
+		if (new_spte != spte) {
+			MemoryRegion *mr;
+			hwaddr l = sxlen_bytes, addr1;
+			mr = address_space_translate(cs->as, pte_addr, &addr1, &l,
+										false, MEMTXATTRS_UNSPECIFIED);
+            target_ulong *pte_pa = qemu_map_ram_ptr(mr->ram_block, addr1);
+
+			*pte_pa = new_spte;
+		}
+
+        base = ppn << PGSHIFT;
+    }
+
+ leaf:
+	// base is point to the this final level
+	idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
+	pte_addr = base + idx * ptesize;
+
+	int vpmp_prot;
+	int vpmp_ret = get_physical_address_pmp(env, &vpmp_prot, pte_addr,
+											sxlen_bytes,
+											MMU_DATA_LOAD, PRV_S);
+	if (vpmp_ret != TRANSLATE_SUCCESS) {
+		return TRANSLATE_PMP_FAIL;
+	}
+
+	target_ulong pte = riscv_cpu_load(env, pte_addr, attrs, &res);
+
+	if (res != MEMTX_OK) {
+		return TRANSLATE_FAIL;
+	}
+
+	if (!(pte & PTE_V)) {
+		/* Invalid PTE */
+		return TRANSLATE_FAIL;
+	}
+
+	if (pte & (PTE_R | PTE_W | PTE_X)) {
+		/* TODO: fill necessary codes */
+		if (memres) {
+			memres->i = i;
+			memres->ptshift = ptshift;
+			memres->ppn = ppn;
+			memres->pte = pte;
+		}
+
+		return TRANSLATE_SUCCESS;
+	}
+
+	/* Inner PTE, continue walking */
+	if (pte & (PTE_D | PTE_A | PTE_U | PTE_ATTR)) {
+		return TRANSLATE_FAIL;
+	}
+
+	/* no next level */
+    return TRANSLATE_FAIL;
+
+ refill:
+    for (;i < 0; i--, ptshift += ptidxbits) {
+		gpte = spte_get_gpte(env, sppn[i], attrs, &res);
+
+		if (res != MEMTX_OK) {
+			return TRANSLATE_FAIL;
+		}
+
+		if (gpte) {
+			base = gpte;
+			break;
+		}
+	}
+
+	if (i < 0) {
+		return TRANSLATE_FAIL;
+	}
+
+    for (; i < levels; i++, ptshift -= ptidxbits) {
+		idx = (addr >> (PGSHIFT + ptshift)) &
+						((1 << ptidxbits) - 1);
+
+        pte_addr = base + idx * ptesize;
+
+        int pmp_prot;
+        int pmp_ret = get_physical_address_pmp(env, &pmp_prot, pte_addr,
+                                               sxlen_bytes,
+                                               MMU_DATA_LOAD, PRV_S);
+        if (pmp_ret != TRANSLATE_SUCCESS) {
+            return TRANSLATE_PMP_FAIL;
+        }
+
+        if (riscv_cpu_mxl(env) == MXL_RV32) {
+            gpte = address_space_ldl(cs->as, pte_addr, attrs, &res);
+        } else {
+            gpte = address_space_ldq(cs->as, pte_addr, attrs, &res);
+        }
+
+        if (res != MEMTX_OK) {
+            return TRANSLATE_FAIL;
+        }
+
+        if (riscv_cpu_sxl(env) == MXL_RV32) {
+            ppn = gpte >> PTE_PPN_SHIFT;
+        } else {
+            if (gpte & PTE_RESERVED) {
+                return TRANSLATE_FAIL;
+            }
+
+            if (!pbmte && (gpte & PTE_PBMT)) {
+                return TRANSLATE_FAIL;
+            }
+
+            if (!riscv_cpu_cfg(env)->ext_svnapot && (gpte & PTE_N)) {
+                return TRANSLATE_FAIL;
+            }
+
+            ppn = (gpte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+        }
+
+        if (!(gpte & PTE_V)) {
+            /* Invalid PTE */
+            return TRANSLATE_FAIL;
+        }
+
+        if (gpte & (PTE_R | PTE_W | PTE_X)) {
+			spte_set_valid(env, sppn[i], idx, attrs, &res);
+			if (res != MEMTX_OK) {
+				return TRANSLATE_FAIL;
+			}
+
+			mark_spte_is_huge(env, sppn[i] + idx * ptesize, attrs, &res);
+			if (res != MEMTX_OK) {
+				return TRANSLATE_FAIL;
+			}
+
+            // goto refill_end;
+			break;
+        }
+
+        /* Inner PTE, continue walking */
+        if (gpte & (PTE_D | PTE_A | PTE_U | PTE_ATTR)) {
+            return TRANSLATE_FAIL;
+        }
+        base = ppn << PGSHIFT;
+
+		spte_set_valid(env, sppn[i], idx, attrs, &res);
+		if (res != MEMTX_OK) {
+			return TRANSLATE_FAIL;
+		}
+
+		// fill get the real one
+		{
+            int vbase_prot;
+            hwaddr vbase;
+
+            int vbase_ret = get_physical_address(env, &vbase, &vbase_prot,
+                                                 base, NULL, MMU_DATA_LOAD,
+                                                 MMUIdx_U, false, true,
+                                                 is_debug, false);
+
+            if (vbase_ret != TRANSLATE_SUCCESS) {
+                if (fault_pte_addr) {
+                    *fault_pte_addr = (base + idx * ptesize) >> 2;
+                }
+                return TRANSLATE_G_STAGE_FAIL;
+            }
+
+			base = vbase;
+		}
+
+		// fill gpte gptr
+		if (i < levels - 1) {
+			spte_set_gpte(env, sppn[i + 1], base, attrs, &res);
+
+			if (res != MEMTX_OK) {
+				return TRANSLATE_FAIL;
+			}
+		}
+	}
+
+//  refill_end:
+
+	// base link to the last level of gpte
+	if (i == levels) {
+		fill_spte_leaf(env, sppn[levels - 1] + idx * ptesize,
+					   (base >> PGSHIFT) << PTE_PPN_SHIFT, attrs, &res);
+	}
+
+	if (res != MEMTX_OK) {
+		return TRANSLATE_FAIL;
+	}
+
+	// TODO: fill base point to the last level
+	goto leaf;
+
+	return TRANSLATE_SUCCESS;
 }
 
 hwaddr riscv_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)

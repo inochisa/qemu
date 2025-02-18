@@ -156,6 +156,8 @@ DEF_HELPER_FLAGS_3(hyp_hsv_b, TCG_CALL_NO_WG, void, env, tl, tl)
 DEF_HELPER_FLAGS_3(hyp_hsv_h, TCG_CALL_NO_WG, void, env, tl, tl)
 DEF_HELPER_FLAGS_3(hyp_hsv_w, TCG_CALL_NO_WG, void, env, tl, tl)
 DEF_HELPER_FLAGS_3(hyp_hsv_d, TCG_CALL_NO_WG, void, env, tl, tl)
+DEF_HELPER_FLAGS_3(hyp_spte_flush, TCG_CALL_NO_WG, void, env, tl, tl)
+DEF_HELPER_FLAGS_3(gst_spte_flush, TCG_CALL_NO_WG, void, env, tl, tl)
 #endif
 
 /* Vector functions */

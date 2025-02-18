@@ -156,6 +156,11 @@ static bool trans_sfence_vma(DisasContext *ctx, arg_sfence_vma *a)
 #ifndef CONFIG_USER_ONLY
     decode_save_opc(ctx, 0);
     gen_helper_tlb_flush(tcg_env);
+
+    TCGv vaddr = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv asid = get_gpr(ctx, a->rs2, EXT_NONE);
+
+	gen_helper_gst_spte_flush(tcg_env, asid, vaddr);
     return true;
 #endif
     return false;

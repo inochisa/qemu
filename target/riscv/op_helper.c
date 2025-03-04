@@ -603,11 +603,13 @@ void helper_hyp_gvma_tlb_flush(CPURISCVState *env)
 static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 						  target_ulong flush_vaddr, bool background)
 {
-    hwaddr vbase;
+    hwaddr vbase, base;
     int vm, asid;
 	int ret_prot;
 
-	if (env->hssatp == 0) {
+    base = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+
+	if (base == 0) {
 		return;
 	}
 
@@ -644,7 +646,7 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 	}
 
 	if (flush_vaddr == 0) {
-		riscv_cpu_flush_all_valid_map(env);
+		riscv_cpu_flush_all_valid_map(env, NULL);
 		return;
 	}
 
@@ -655,7 +657,7 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 void helper_gst_spte_flush(CPURISCVState *env, target_ulong asid,
 						   target_ulong vaddr)
 {
-	if (env->hssatp == 0 || !env->virt_enabled) {
+	if (!env->virt_enabled) {
 		return;
 	}
 
@@ -665,7 +667,7 @@ void helper_gst_spte_flush(CPURISCVState *env, target_ulong asid,
 void helper_hyp_spte_flush(CPURISCVState *env, target_ulong asid,
 						   target_ulong vaddr)
 {
-	if (env->hssatp == 0  || env->virt_enabled) {
+	if (env->virt_enabled) {
 		return;
 	}
 

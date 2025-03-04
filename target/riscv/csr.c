@@ -4293,11 +4293,14 @@ static RISCVException write_satp(CPURISCVState *env, int csrno,
     }
 
 	target_ulong old_satp = env->satp;
+	hwaddr base;
 
     env->satp = legalize_xatp(env, env->satp, val);
 
+    base = (hwaddr)riscv_cpu_get_field(env, env->satp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+
 	if (env->virt_enabled && old_satp != env->satp) {
-		riscv_cpu_flush_all_valid_map(env);
+		riscv_cpu_flush_all_valid_map(env, &base);
 	}
 
     return RISCV_EXCP_NONE;
@@ -4920,9 +4923,16 @@ static RISCVException read_hssatp(CPURISCVState *env, int csrno,
 }
 
 static RISCVException write_hssatp(CPURISCVState *env, int csrno,
-                                   target_ulong val)
+                                   target_ulong val, uintptr_t ra)
 {
+    hwaddr base;
+
     env->hssatp = legalize_xatp(env, env->hssatp, val);
+
+    base = (hwaddr)riscv_cpu_get_field(env, env->vsatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+
+    riscv_cpu_flush_all_valid_map(env, &base);
+
     return RISCV_EXCP_NONE;
 }
 
@@ -5212,11 +5222,14 @@ static RISCVException write_vsatp(CPURISCVState *env, int csrno,
                                   target_ulong val, uintptr_t ra)
 {
 	target_ulong old_satp = env->vsatp;
+    hwaddr base;
 
     env->vsatp = legalize_xatp(env, env->vsatp, val);
 
+    base = (hwaddr)riscv_cpu_get_field(env, env->vsatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+
 	if (!env->virt_enabled && old_satp != env->vsatp) {
-		riscv_cpu_flush_all_valid_map(env);
+		riscv_cpu_flush_all_valid_map(env, &base);
 	}
 
     return RISCV_EXCP_NONE;

@@ -572,6 +572,10 @@ static inline int riscv_has_ext(CPURISCVState *env, target_ulong ext)
     return (env->misa_ext & ext) != 0;
 }
 
+#define riscv_cpu_get_field(env, csr, mask32, mask64)    \
+    ((riscv_cpu_mxl(env) == MXL_RV32) ?                \
+     (get_field((csr), (mask32))) : (get_field((csr), (mask32))))
+
 #include "cpu_user.h"
 
 extern const char * const riscv_int_regnames[];
@@ -623,7 +627,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 									  int *ret_prot, vaddr addr,
 									  target_ulong *fault_pte_addr,
 									  bool flush, bool is_debug);
-void riscv_cpu_flush_all_valid_map(CPURISCVState *env);
+void riscv_cpu_flush_all_valid_map(CPURISCVState *env, hwaddr *gbase);
 void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr);
 void riscv_cpu_flush_spte_gptr(CPURISCVState *env);
 void riscv_cpu_do_interrupt(CPUState *cpu);

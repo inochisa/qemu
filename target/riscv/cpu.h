@@ -574,7 +574,7 @@ static inline int riscv_has_ext(CPURISCVState *env, target_ulong ext)
 
 #define riscv_cpu_get_field(env, csr, mask32, mask64)    \
     ((riscv_cpu_mxl(env) == MXL_RV32) ?                \
-     (get_field((csr), (mask32))) : (get_field((csr), (mask32))))
+     (get_field((csr), (mask32))) : (get_field((csr), (mask64))))
 
 #include "cpu_user.h"
 
@@ -618,8 +618,10 @@ bool riscv_cpu_option_set(const char *optname);
 struct RISCVShadowMemRes {
 	int i;
 	int ptshift;
+    hwaddr base;
     hwaddr ppn;
     target_ulong pte;
+    hwaddr pte_addr;
 };
 
 int riscv_get_shadow_physical_address(CPURISCVState *env,

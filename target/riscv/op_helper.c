@@ -635,7 +635,7 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 		}
 	}
 
-	/* early return if not fill vsatp */
+	/* early return if not fill satp */
 	if (vm == VM_1_10_MBARE || vbase == 0) {
 		return;
 	}
@@ -645,12 +645,15 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 		return;
 	}
 
+    qemu_log("SMMU: fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", flush_vaddr, flush_asid);
+
 	if (flush_vaddr == 0) {
 		riscv_cpu_flush_all_valid_map(env, NULL);
 		return;
 	}
 
-	riscv_get_shadow_physical_address(env, NULL, &ret_prot, vbase, NULL, true, false);
+	riscv_get_shadow_physical_address(env, NULL, &ret_prot,
+                                      (hwaddr)flush_vaddr, NULL, true, false);
 }
 
 

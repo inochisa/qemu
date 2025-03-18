@@ -1517,6 +1517,7 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
 
     hwaddr sbase;
     sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+    env->two_stage_shadow = false;
 
     if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
         struct RISCVShadowMemRes memres;
@@ -2326,7 +2327,10 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         qemu_log("SMMU: refill %d, #" TARGET_FMT_lu ": sppn " HWADDR_FMT_plx "\n", i, idx, ppn);
 
         if (!ppn) { /* empty pte */
+            qemu_log("SMMU: refill %d, #" TARGET_FMT_lu ": trigger SPF\n", i, idx);
             /* TODO: trigger shadow page fault */
+            env->two_stage_shadow = true;
+            return TRANSLATE_G_STAGE_FAIL;
         }
 
         // get next level shadow pfn
@@ -2919,7 +2923,10 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                  * doing VS-stage page table walk.
                  */
                 tinst = (riscv_cpu_xlen(env) == 32) ? 0x00002000 : 0x00003000;
-                /* TODO: ADD HSSAPT trap here */
+
+                if (env->two_stage_shadow) {
+                    tinst |= 0x0010000;
+                }
             } else {
                 /*
                  * The "Addr. Offset" field in transformed instruction is
@@ -2940,7 +2947,10 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                  * doing VS-stage page table walk.
                  */
                 tinst = (riscv_cpu_xlen(env) == 32) ? 0x00002000 : 0x00003000;
-                /* TODO: ADD HSSAPT trap here */
+
+                if (env->two_stage_shadow) {
+                    tinst |= 0x0010000;
+                }
             }
             break;
         case RISCV_EXCP_ILLEGAL_INST:
@@ -3185,6 +3195,7 @@ void riscv_cpu_do_interrupt(CPUState *cs)
 
     env->two_stage_lookup = false;
     env->two_stage_indirect_lookup = false;
+    env->two_stage_shadow = false;
 }
 
 #endif /* !CONFIG_USER_ONLY */

@@ -240,3 +240,59 @@ CpuModelExpansionInfo *qmp_query_cpu_model_expansion(CpuModelExpansionType type,
 
     return expansion_info;
 }
+
+static void riscv_cpu_add_smmu_definition(CPUState *cs, void *user_data)
+{
+    SmmuDefinitionInfoList **smmu_list = user_data;
+    SmmuDefinitionInfo *info = g_malloc0(sizeof(*info));
+    RISCVCPU *cpu = RISCV_CPU(cs);
+    CPURISCVState *env = &cpu->env;
+
+    info->vmt = env->access_vmt;
+    info->smt = env->access_smt;
+    info->hmt = env->access_hmt;
+    info->shit = env->shadow_hit;
+    info->spf = env->shadow_pf;
+    info->spos = env->shadow_posion;
+    info->sff = env->shadow_full_fence;
+    info->sfe = env->shadow_fence;
+    info->smr = env->shadow_r;
+    info->smw = env->shadow_w;
+
+    QAPI_LIST_PREPEND(*smmu_list, info);
+}
+
+SmmuDefinitionInfoList *qmp_x_query_smmu(Error **errp)
+{
+    SmmuDefinitionInfoList *smmu_list = NULL;
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        riscv_cpu_add_smmu_definition(cpu, &smmu_list);
+    };
+
+    return smmu_list;
+}
+
+void qmp_x_reset_smmu(Error **errp)
+{
+    CPUState *cs;
+
+    CPU_FOREACH(cs) {
+        RISCVCPU *cpu = RISCV_CPU(cs);
+        CPURISCVState *env = &cpu->env;
+
+        env->access_vmt = 0;
+        env->access_smt = 0;
+        env->access_hmt = 0;
+        env->shadow_hit = 0;
+        env->shadow_pf = 0;
+        env->shadow_posion = 0;
+        env->shadow_full_fence = 0;
+        env->shadow_fence = 0;
+        env->shadow_r = 0;
+        env->shadow_w = 0;
+    };
+
+    return;
+}

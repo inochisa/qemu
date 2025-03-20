@@ -1172,6 +1172,7 @@ static inline target_ulong riscv_cpu_load(CPURISCVState *env, hwaddr addr,
 {
     CPUState *cs = env_cpu(env);
 
+    env->shadow_r++;
     if (riscv_cpu_mxl(env) == MXL_RV32) {
         return address_space_ldl(cs->as, addr, attrs, result);
     } else {
@@ -1185,6 +1186,7 @@ static inline void riscv_cpu_store(CPURISCVState *env, hwaddr addr,
 {
     CPUState *cs = env_cpu(env);
 
+    env->shadow_w++;
     if (riscv_cpu_mxl(env) == MXL_RV32) {
         address_space_stl(cs->as, addr, val, attrs, result);
     } else {
@@ -1322,6 +1324,8 @@ static void posion_spte(CPURISCVState *env, hwaddr base, hwaddr *gbase)
 
         qatomic_set((target_ulong *)(pte + (SPTE_GPTE_PTR - SEPTE_OFFSET)), *gbase);
     }
+
+    env->shadow_posion++;
 }
 
 void riscv_cpu_flush_all_valid_map(CPURISCVState *env, hwaddr *gbase)
@@ -1333,6 +1337,8 @@ void riscv_cpu_flush_all_valid_map(CPURISCVState *env, hwaddr *gbase)
     if (base == 0) {
         return;
     }
+
+    env->shadow_full_fence++;
 
     posion_spte(env, base, gbase);
 }
@@ -1476,6 +1482,10 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
       g_assert_not_reached();
     }
 
+    if (first_stage && two_stage) {
+        env->access_vmt++;
+    }
+
     CPUState *cs = env_cpu(env);
     int va_bits = PGSHIFT + levels * ptidxbits + widened;
     int sxlen = 16 << riscv_cpu_sxl(env);
@@ -1521,6 +1531,8 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
 
     if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
         struct RISCVShadowMemRes memres;
+
+        env->access_smt++;
 
         int ret = riscv_get_shadow_physical_address(env, &memres, ret_prot,
                                                     addr, fault_pte_addr,
@@ -1925,6 +1937,7 @@ static int riscv_get_gstage_pte_addr(CPURISCVState *env, target_ulong *pte,
         }
         return TRANSLATE_G_STAGE_FAIL;
     }
+    env->access_hmt++;
 
     pte_addr = vbase + idx * ptesize;
 
@@ -2140,6 +2153,8 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
                 return TRANSLATE_FAIL;
             }
 
+            env->shadow_hit++;
+
             goto leaf;
         }
 
@@ -2158,6 +2173,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
         base = ppn << PGSHIFT;
     }
+    env->shadow_hit++;
 
  leaf:
     qemu_log("SMMU: final %d: base " HWADDR_FMT_plx "\n", i, base);
@@ -2330,6 +2346,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             qemu_log("SMMU: refill %d, #" TARGET_FMT_lu ": trigger SPF\n", i, idx);
             /* TODO: trigger shadow page fault */
             env->two_stage_shadow = true;
+            env->shadow_pf++;
             return TRANSLATE_G_STAGE_FAIL;
         }
 

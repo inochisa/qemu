@@ -652,6 +652,8 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 		return;
 	}
 
+    env->shadow_fence++;
+
 	riscv_get_shadow_physical_address(env, NULL, &ret_prot,
                                       (hwaddr)flush_vaddr, NULL, true, false);
 }

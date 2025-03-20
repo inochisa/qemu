@@ -2279,3 +2279,54 @@
 # Since: 1.2
 ##
 { 'command': 'query-cpu-definitions', 'returns': ['CpuDefinitionInfo'] }
+
+##
+# @SmmuDefinitionInfo:
+#
+# Virtual CPU SMMU definition.
+#
+# @vmt: access_vmt
+# @smt: access_smt
+# @hmt: access_hmt
+# @shit: shadow_hit
+# @spf: shadow_pf
+# @spos: shadow_posion
+# @sff: shadow_full_fence
+# @sfe: shadow_fence
+# @smr: shadow_r
+# @smw: shadow_w
+#
+# Since: 1.2
+##
+{ 'struct': 'SmmuDefinitionInfo',
+  'data': { 'vmt': 'uint64',
+            'smt': 'uint64',
+            'hmt': 'uint64',
+            'shit': 'uint64',
+            'spf': 'uint64',
+            'spos': 'uint64',
+            'sff': 'uint64',
+            'sfe': 'uint64',
+            'smr': 'uint64',
+            'smw': 'uint64' }
+}
+
+##
+# @x-query-smmu:
+#
+# Return status of CPU SMMU
+#
+# Returns: a list of SmmuDefinitionInfo
+#
+# Since: 1.2
+##
+{ 'command': 'x-query-smmu', 'returns': ['SmmuDefinitionInfo'] }
+
+##
+# @x-reset-smmu:
+#
+# Reset status of CPU SMMU
+#
+# Since: 1.2
+##
+{ 'command': 'x-reset-smmu' }

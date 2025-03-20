@@ -19,3 +19,14 @@ qmp_query_cpu_definitions(Error **errp)
     error_setg(errp, "CPU model definitions are not supported on this target");
     return NULL;
 }
+
+SmmuDefinitionInfoList *qmp_x_query_smmu(Error **errp)
+{
+    error_setg(errp, "SMMU model definitions are not supported on this target");
+    return NULL;
+}
+
+void qmp_x_reset_smmu(Error **errp)
+{
+    error_setg(errp, "SMMU reset are not supported on this target");
+}

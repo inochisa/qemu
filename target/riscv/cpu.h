@@ -343,6 +343,18 @@ struct CPUArchState {
     uint64_t htimedelta;
     uint64_t hvien;
 
+    /* SMMU states */
+    uint64_t access_vmt;
+    uint64_t access_smt;
+    uint64_t access_hmt;
+    uint64_t shadow_hit;
+    uint64_t shadow_pf;
+    uint64_t shadow_posion;
+    uint64_t shadow_full_fence;
+    uint64_t shadow_fence;
+    uint64_t shadow_r;
+    uint64_t shadow_w;
+
     /*
      * Bits VSSIP, VSTIP and VSEIP in hvip are maintained in mip. Other bits
      * from 0:12 are reserved. Bits 13:63 are not aliased and must be separately

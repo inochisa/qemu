@@ -19,6 +19,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "cpu.h"
 #include "internals.h"
 #include "exec/cputlb.h"
@@ -645,7 +646,7 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 		return;
 	}
 
-    qemu_log("SMMU: fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", flush_vaddr, flush_asid);
+    qemu_log_mask(CPU_LOG_SMMU, "SMMU: fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", flush_vaddr, flush_asid);
 
 	if (flush_vaddr == 0) {
 		riscv_cpu_flush_all_valid_map(env, NULL);

@@ -4299,7 +4299,7 @@ static RISCVException write_satp(CPURISCVState *env, int csrno,
 
 
 	if (env->virt_enabled && old_satp != env->satp) {
-        qemu_log("update satp/v with " TARGET_FMT_lx "\n", env->satp);
+        qemu_log_mask(CPU_LOG_SMMU, "update satp/v with " TARGET_FMT_lx "\n", env->satp);
         base = (hwaddr)riscv_cpu_get_field(env, env->satp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
 		riscv_cpu_flush_all_valid_map(env, &base);
 	}
@@ -4928,7 +4928,7 @@ static RISCVException write_hssatp(CPURISCVState *env, int csrno,
 {
     env->hssatp = val;
 
-    qemu_log("update hssatp with " TARGET_FMT_lx "\n", env->hssatp);
+    qemu_log_mask(CPU_LOG_SMMU, "update hssatp with " TARGET_FMT_lx "\n", env->hssatp);
 
     return RISCV_EXCP_NONE;
 }

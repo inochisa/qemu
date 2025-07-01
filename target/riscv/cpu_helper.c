@@ -1245,7 +1245,7 @@ static void spte_set_validmap(CPURISCVState *env, hwaddr base, target_ulong idx,
                               bool set, MemTxAttrs attrs, MemTxResult *res)
 {
     int size = riscv_cpu_xlen(env);
-    int offset = (idx / size) * size;
+    int offset = (idx / size) * size / 8;
     target_ulong mask = 1 << (idx % size);
     target_ulong value = set ? mask : 0;
 
@@ -1270,7 +1270,7 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
 {
     target_ulong value;
     int size = riscv_cpu_xlen(env);
-    int offset = (idx / size) * size;
+    int offset = (idx / size) * size / 8;
 
     value = get_spte_info(env, base, SPTE_VALID_MAP + offset,
                           attrs, res);
@@ -1294,27 +1294,41 @@ static void spte_set_gpte(CPURISCVState *env, hwaddr base, target_ulong gpte,
     set_spte_info(env, base, SPTE_GPTE_PTR, gpte, attrs, res);
 }
 
-static void *spte_map_extra_page(CPURISCVState *env, hwaddr base)
-{
-    CPUState *cs = env_cpu(env);
-    hwaddr l = TARGET_PAGE_SIZE, addr1;
-    MemoryRegion *mr;
+// static void *spte_map_extra_page(CPURISCVState *env, hwaddr base)
+// {
+//     CPUState *cs = env_cpu(env);
+//     hwaddr l = TARGET_PAGE_SIZE, addr1;
+//     MemoryRegion *mr;
 
-    mr = address_space_translate(cs->as, base + SEPTE_OFFSET, &addr1, &l,
-                                 false, MEMTXATTRS_UNSPECIFIED);
+//     mr = address_space_translate(cs->as, base + SEPTE_OFFSET, &addr1, &l,
+//                                  false, MEMTXATTRS_UNSPECIFIED);
 
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: map extra addr " HWADDR_FMT_plx " at 0x%llx\n", base, (unsigned long long)mr);
+//     qemu_log_mask(CPU_LOG_SMMU, "SMMU: map extra addr " HWADDR_FMT_plx " at 0x%llx\n", base, (unsigned long long)mr);
 
-    return qemu_map_ram_ptr(mr->ram_block, addr1);
-}
+//     return qemu_map_ram_ptr(mr->ram_block, addr1);
+// }
 
 static void posion_spte(CPURISCVState *env, hwaddr base, hwaddr *gbase)
 {
     int size = TARGET_PAGE_SIZE / riscv_cpu_xlen(env);
-    void *pte = spte_map_extra_page(env, base);
+    int opsize = riscv_cpu_xlen(env) / 8;
+    int opnum = size / opsize;
+    // void *pte = spte_map_extra_page(env, base);
+    MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
+    MemTxResult res;
 
     // posion the valid map
-    memset(pte + (SPTE_VALID_MAP - SEPTE_OFFSET), 0x00, size);
+    for (int i = 0; i < opnum; i++) {
+        unsigned long offset = opsize * i;
+        set_spte_info(env, base, SPTE_VALID_MAP + offset, 0, attrs, &res);
+
+        if (res != MEMTX_OK) {
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: posion fault addr=" HWADDR_FMT_plx " offset %lu\n", base, offset);
+        }
+        // void *addr = pte + (SPTE_VALID_MAP - SEPTE_OFFSET) + opsize * i;
+        // qatomic_set((target_ulong *)addr, 0);
+    }
+    // memset(pte + (SPTE_VALID_MAP - SEPTE_OFFSET), 0x00, size);
 
     qemu_log_mask(CPU_LOG_SMMU, "SMMU: posion addr=" HWADDR_FMT_plx "\n", base);
 
@@ -1322,7 +1336,12 @@ static void posion_spte(CPURISCVState *env, hwaddr base, hwaddr *gbase)
     if (gbase) {
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: posion set gpte addr " HWADDR_FMT_plx "\n", *gbase);
 
-        qatomic_set((target_ulong *)(pte + (SPTE_GPTE_PTR - SEPTE_OFFSET)), *gbase);
+        set_spte_info(env, base, SPTE_GPTE_PTR, *gbase, attrs, &res);
+
+        if (res != MEMTX_OK) {
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: posion gptr fault addr=" HWADDR_FMT_plx "\n", base);
+        }
+        // qatomic_set((target_ulong *)(pte + (SPTE_GPTE_PTR - SEPTE_OFFSET)), *gbase);
     }
 
     env->shadow_posion++;

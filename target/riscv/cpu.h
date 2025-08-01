@@ -635,6 +635,8 @@ struct RISCVShadowMemRes {
     hwaddr ppn;
     target_ulong pte;
     hwaddr pte_addr;
+    hwaddr sbase;
+    int sidx;
 };
 
 int riscv_get_shadow_physical_address(CPURISCVState *env,

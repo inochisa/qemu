@@ -1535,9 +1535,9 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     env->two_stage_shadow = false;
 
+    struct RISCVShadowMemRes memres;
+    memset(&memres, 0, sizeof(memres));
     if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
-        struct RISCVShadowMemRes memres;
-
         env->access_smt++;
 
         int ret = riscv_get_shadow_physical_address(env, &memres, ret_prot,
@@ -1839,6 +1839,11 @@ restart:
     *physical = (((ppn & ~napot_mask) | (vpn & napot_mask) |
                   (vpn & (((target_ulong)1 << ptshift) - 1))
                  ) << PGSHIFT) | (addr & ~TARGET_PAGE_MASK);
+
+    // TODO: mark related spte as valid
+    if (memres.sbase) {
+        spte_set_valid(env, memres.sbase, memres.sidx, attrs, &res);
+    }
 
     /*
      * Remove write permission unless this is a store, or the page is
@@ -2237,6 +2242,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             memres->ppn = ppn;
             memres->pte = pte;
             memres->pte_addr = gpte_addr;
+            memres->sidx = idx;
         }
 
         return TRANSLATE_SUCCESS;
@@ -2304,11 +2310,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
                 return TRANSLATE_FAIL;
             }
 
-            spte_set_valid(env, sbase[i], idx, attrs, &res);
-            if (res != MEMTX_OK) {
-                return TRANSLATE_FAIL;
-            }
-
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": set huge gpte\n", i, idx);
 
             break;
@@ -2332,6 +2333,10 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
             if (res != MEMTX_OK) {
                 return TRANSLATE_FAIL;
+            }
+
+            if (memres) {
+                memres->sbase = sbase[levels - 1];
             }
 
             continue;

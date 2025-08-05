@@ -2538,7 +2538,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                                        access_type, MMUIdx_U, false, true,
                                        false, probe);
 
-            qemu_log_mask(CPU_LOG_MMU | CPU_LOG_SMMU,
+            qemu_log_mask(CPU_LOG_MMU | CPU_LOG_SMMU | CPU_LOG_SMA,
                           "%s 2nd-stage address=%" VADDR_PRIx
                           " ret %d physical "
                           HWADDR_FMT_plx " prot %d\n",
@@ -2551,7 +2551,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                                                size, access_type, mode);
                 tlb_size = pmp_get_tlb_size(env, pa);
 
-                qemu_log_mask(CPU_LOG_MMU | CPU_LOG_SMMU,
+                qemu_log_mask(CPU_LOG_MMU | CPU_LOG_SMMU | CPU_LOG_SMA,
                               "%s PMP address=" HWADDR_FMT_plx " ret %d prot"
                               " %d tlb_size %" HWADDR_PRIu "\n",
                               __func__, pa, ret, prot_pmp, tlb_size);

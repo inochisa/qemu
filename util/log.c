@@ -507,6 +507,8 @@ const QEMULogItem qemu_log_items[] = {
       "log invalid memory accesses" },
     { CPU_LOG_SMMU, "smmu",
       "log every SMMU operations" },
+    { CPU_LOG_SMA, "sma",
+      "log every shadow memory access/fence operations" },
     { 0, NULL, NULL },
 };
 

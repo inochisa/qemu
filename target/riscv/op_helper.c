@@ -646,7 +646,7 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 		return;
 	}
 
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", flush_vaddr, flush_asid);
+    qemu_log_mask(CPU_LOG_SMMU | CPU_LOG_SMA, "SMMU: fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", flush_vaddr, flush_asid);
 
     riscv_cpu_flush_all_valid_map(env, NULL);
     return;

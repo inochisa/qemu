@@ -39,6 +39,7 @@ bool qemu_log_separate(void);
 #define LOG_TB_OP_PLUGIN   (1 << 22)
 #define LOG_INVALID_MEM    (1 << 23)
 #define CPU_LOG_SMMU       (1 << 24)
+#define CPU_LOG_SMA         (1 << 24)
 
 /* Lock/unlock output. */
 

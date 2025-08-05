@@ -2096,8 +2096,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
       levels = 3; ptidxbits = 9; ptesize = 8; break;
     case VM_1_10_SV57:
       levels = 4; ptidxbits = 9; ptesize = 8; break;
-    case VM_1_10_MBARE:
-      return TRANSLATE_G_STAGE_FAIL;
     default:
       g_assert_not_reached();
     }
@@ -2123,6 +2121,12 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         sbase[i] = base;
 
         idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
+
+        /* Always check spte is valid first */
+        if (!check_spte_is_valid(env, base, idx, attrs, &res)) {
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": need refill\n", i, idx);
+            goto refill;
+        }
 
         int sstage_ret = riscv_get_sstage_pte_addr(env, &spte, base, idx,
                                                    ptesize, sxlen_bytes,
@@ -2180,11 +2184,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
                 spte_set_invalid(env, base, idx, attrs, &res);
                 return TRANSLATE_SUCCESS;
             }
-        }
-
-        if (!check_spte_is_valid(env, base, idx, attrs, &res)) {
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": need refill\n", i, idx);
-            goto refill;
         }
 
         if(new_spte & PTE_V) { // is huge pte

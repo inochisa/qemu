@@ -632,9 +632,6 @@ struct RISCVShadowMemRes {
 	int i;
 	int ptshift;
     hwaddr base;
-    hwaddr ppn;
-    target_ulong pte;
-    hwaddr pte_addr;
     hwaddr sbase;
     int sidx;
 };

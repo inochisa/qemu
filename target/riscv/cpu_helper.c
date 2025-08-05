@@ -1550,14 +1550,9 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
 
         i = memres.i;
         ptshift = memres.ptshift;
-        pte = memres.pte;
-        ppn = memres.ppn;
         base = memres.base;
-        pte_addr = memres.pte_addr;
 
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: found level %d, ptshift %d, pte " TARGET_FMT_lx " ppn " TARGET_FMT_lx "\n", i, ptshift, pte, ppn);
-
-        goto leaf;
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: found level %d\n", i);
     }
 
 restart:
@@ -2218,41 +2213,15 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     env->shadow_hit++;
 
  leaf:
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: final %d: base " HWADDR_FMT_plx "\n", i, base);
-
-    // base is point to the this final level
-    idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
-    target_ulong pte;
-    hwaddr gpte_addr;
-
-    int final_ret = riscv_get_gstage_pte_ppn(env, &pte, &ppn, &gpte_addr,
-                                             base, idx, ptesize, sxlen_bytes,
-                                             fault_pte_addr, is_debug, pbmte,
-                                             attrs);
-    if (final_ret != TRANSLATE_SUCCESS) {
-        return final_ret;
-    }
-
-    if (pte & (PTE_R | PTE_W | PTE_X)) {
-        if (memres) {
-            memres->i = i;
-            memres->ptshift = ptshift;
-            memres->base = base;
-            memres->ppn = ppn;
-            memres->pte = pte;
-            memres->pte_addr = gpte_addr;
-            memres->sidx = idx;
-        }
+    if (memres) {
+        memres->i = i;
+        memres->ptshift = ptshift;
+        memres->base = base;
+        memres->sidx = idx;
 
         return TRANSLATE_SUCCESS;
     }
 
-    /* Inner PTE, continue walking */
-    if (pte & (PTE_D | PTE_A | PTE_U | PTE_ATTR)) {
-        return TRANSLATE_FAIL;
-    }
-
-    /* no next level */
     return TRANSLATE_FAIL;
 
  refill:

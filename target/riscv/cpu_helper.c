@@ -1538,12 +1538,15 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     bool is_shadow = false;
     struct RISCVShadowMemRes memres;
     memset(&memres, 0, sizeof(memres));
+    memres.ptshift = ptshift;
+
     if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
         env->access_smt++;
         is_shadow = true;
 
         int ret = riscv_get_shadow_physical_address(env, &memres, ret_prot,
                                                     addr, fault_pte_addr,
+                                                    levels - 1, ptidxbits, ptesize,
                                                     false, is_debug);
 
         if (ret != TRANSLATE_SUCCESS) {
@@ -2038,38 +2041,15 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
                                       struct RISCVShadowMemRes *memres,
                                       int *ret_prot, vaddr addr,
                                       target_ulong *fault_pte_addr,
+                                      int levels, int ptidxbits, int ptesize,
                                       bool flush, bool is_debug)
 {
     MemTxResult res;
     MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
-    hwaddr base;
-    int levels, ptidxbits, ptesize, vm;
     hwaddr ppn;
 
-    base = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
-    // XXX: may be used for satp/vsatp
-    if (!env->virt_enabled) {
-        vm = riscv_cpu_get_field(env, env->vsatp, SATP32_MODE, SATP64_MODE);
-    } else {
-        vm = riscv_cpu_get_field(env, env->satp, SATP32_MODE, SATP64_MODE);
-    }
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: addr=" HWADDR_FMT_plx ", type=%d, require %" VADDR_PRIx "\n", base, vm, addr);
-
-    switch (vm) {
-    case VM_1_10_SV32:
-      levels = 1; ptidxbits = 10; ptesize = 4; break;
-    case VM_1_10_SV39:
-      levels = 2; ptidxbits = 9; ptesize = 8; break;
-    case VM_1_10_SV48:
-      levels = 3; ptidxbits = 9; ptesize = 8; break;
-    case VM_1_10_SV57:
-      levels = 4; ptidxbits = 9; ptesize = 8; break;
-    default:
-      g_assert_not_reached();
-    }
-
     CPUState *cs = env_cpu(env);
+    hwaddr base = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     int sxlen = 16 << riscv_cpu_sxl(env);
     int sxlen_bytes = sxlen / 8;
 
@@ -2078,7 +2058,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         pbmte = pbmte && (env->henvcfg & HENVCFG_PBMTE);
     }
 
-    int ptshift = levels * ptidxbits;
+    int ptshift = memres->ptshift;
     target_ulong sbase[6] = {0, 0, 0, 0, 0, 0};
     target_ulong idx;
     target_ulong spte;

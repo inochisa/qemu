@@ -634,6 +634,7 @@ struct RISCVShadowMemRes {
 	int ptshift;
     hwaddr base;
     int sidx;
+    bool refill;
 };
 
 int riscv_get_shadow_physical_address(CPURISCVState *env,

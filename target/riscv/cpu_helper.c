@@ -1369,6 +1369,30 @@ static void fill_spte_leaf(CPURISCVState *env, hwaddr addr, target_ulong pte,
     riscv_cpu_store(env, addr, pte, attrs, res);
 }
 
+static int riscv_get_pte_ppn(CPURISCVState *env, target_ulong pte,
+                             hwaddr *ppn, bool pbmte)
+{
+    if (riscv_cpu_sxl(env) == MXL_RV32) {
+        *ppn = pte >> PTE_PPN_SHIFT;
+    } else {
+        if (pte & PTE_RESERVED) {
+            return TRANSLATE_FAIL;
+        }
+
+        if (!pbmte && (pte & PTE_PBMT)) {
+            return TRANSLATE_FAIL;
+        }
+
+        if (!riscv_cpu_cfg(env)->ext_svnapot && (pte & PTE_N)) {
+            return TRANSLATE_FAIL;
+        }
+
+        *ppn = (pte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+    }
+
+    return TRANSLATE_SUCCESS;
+}
+
 /*
  * get_physical_address - get the physical address for this virtual address
  *
@@ -1529,17 +1553,18 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     int ptshift = (levels - 1) * ptidxbits;
     target_ulong pte;
     hwaddr pte_addr;
-    int i;
+    int i = 0;
 
     hwaddr sbase;
     sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     env->two_stage_shadow = false;
 
     bool is_shadow = false;
-    bool shadow_levels = levels - 1;
+    int shadow_levels = levels - 1;
     struct RISCVShadowMemRes memres;
     memset(&memres, 0, sizeof(memres));
     memres.ptshift = ptshift;
+    memres.refill = false;
 
     if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
         env->access_smt++;
@@ -1558,11 +1583,11 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
         ptshift = memres.ptshift;
         base = memres.base;
 
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: found level %d\n", i);
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: found level %d with ptshift %d, base 0x%016" HWADDR_PRIx "\n", i, ptshift, base);
     }
 
 restart:
-    for (i = 0; i < levels; i++, ptshift -= ptidxbits) {
+    for (; i < levels; i++, ptshift -= ptidxbits) {
         target_ulong idx;
         if (i == 0) {
             idx = (addr >> (PGSHIFT + ptshift)) &
@@ -1589,6 +1614,10 @@ restart:
                     *fault_pte_addr = (base + idx * ptesize) >> 2;
                 }
                 return TRANSLATE_G_STAGE_FAIL;
+            }
+
+            if (is_shadow) {
+                env->access_hmt++;
             }
 
             pte_addr = vbase + idx * ptesize;
@@ -1655,6 +1684,23 @@ restart:
         }
 
         if (pte & (PTE_R | PTE_W | PTE_X)) {
+            if (memres.refill && i < shadow_levels) {
+                hwaddr cur_sbase = memres.sbase[i];
+
+                qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": fill huge level\n", i, idx);
+
+                mark_spte_is_huge(env, cur_sbase + idx * ptesize, attrs, &res);
+                if (res != MEMTX_OK) {
+                    return TRANSLATE_FAIL;
+                }
+
+                qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": set huge gpte\n", i, idx);
+
+                /* mark the level */
+                memres.sidx = idx;
+                memres.i = i;
+            }
+
             goto leaf;
         }
 
@@ -1667,6 +1713,65 @@ restart:
         }
         /* Inner PTE, continue walking */
         base = ppn << PGSHIFT;
+
+        if (memres.refill && i < shadow_levels) {
+            hwaddr cur_sbase = memres.sbase[i];
+            hwaddr spte_addr = cur_sbase + idx * ptesize;
+
+            pmp_ret = get_physical_address_pmp(env, &pmp_prot, pte_addr,
+                                               sxlen_bytes,
+                                               MMU_DATA_LOAD, PRV_S);
+            if (pmp_ret != TRANSLATE_SUCCESS) {
+                return TRANSLATE_PMP_FAIL;
+            }
+
+            target_ulong spte = riscv_cpu_load(env, spte_addr, attrs, &res);
+            if (res != MEMTX_OK) {
+                return TRANSLATE_FAIL;
+            }
+
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": spte " HWADDR_FMT_plx "\n", i, idx, spte);
+
+            hwaddr sppn;
+            int sstage_ret = riscv_get_pte_ppn(env, spte, &sppn, pbmte);
+            if (sstage_ret != TRANSLATE_SUCCESS) {
+                return sstage_ret;
+            }
+
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": sppn " HWADDR_FMT_plx "\n", i, idx, sppn);
+
+            if (sppn == 0 && i < shadow_levels - 1) {
+                qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": trigger SPF\n", i, idx);
+                env->two_stage_shadow = true;
+                env->shadow_pf++;
+                return TRANSLATE_G_STAGE_FAIL;
+            }
+
+            if (i == shadow_levels - 1) {
+                qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": fill last level\n", i, idx);
+
+                fill_spte_leaf(env, cur_sbase + idx * ptesize,
+                               ppn << PTE_PPN_SHIFT, attrs, &res);
+
+                if (res != MEMTX_OK) {
+                    return TRANSLATE_FAIL;
+                }
+
+                memres.sidx = -1;
+            } else {
+                /* get next level shadow pfn */
+                memres.sbase[i + 1] = sppn << PGSHIFT;
+
+                /* clean next level and fill gpte gptr */
+                posion_spte(env, memres.sbase[i + 1], &base);
+            }
+
+            /* set valid as we already find a valid next level ptr */
+            spte_set_valid(env, cur_sbase, idx, attrs, &res);
+            if (res != MEMTX_OK) {
+                return TRANSLATE_FAIL;
+            }
+        }
     }
 
     /* No leaf pte at any translation level. */
@@ -1845,9 +1950,11 @@ restart:
                   (vpn & (((target_ulong)1 << ptshift) - 1))
                  ) << PGSHIFT) | (addr & ~TARGET_PAGE_MASK);
 
-    // TODO: mark related spte as valid
-    if (is_shadow && memres.i < shadow_levels) {
+    if (memres.refill && memres.sidx > 0 && memres.i < shadow_levels) {
         spte_set_valid(env, memres.sbase[memres.i], memres.sidx, attrs, &res);
+        if (res == MEMTX_OK) {
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: update %d, #%d: update base 0x%016" HWADDR_PRIx "\n", memres.i, memres.sidx, memres.sbase[memres.i]);
+        }
     }
 
     /*
@@ -1984,30 +2091,6 @@ static int riscv_get_gstage_pte_addr(CPURISCVState *env, target_ulong *pte,
     return TRANSLATE_SUCCESS;
 }
 
-static int riscv_get_pte_ppn(CPURISCVState *env, target_ulong pte,
-                             hwaddr *ppn, bool pbmte)
-{
-    if (riscv_cpu_sxl(env) == MXL_RV32) {
-        *ppn = pte >> PTE_PPN_SHIFT;
-    } else {
-        if (pte & PTE_RESERVED) {
-            return TRANSLATE_FAIL;
-        }
-
-        if (!pbmte && (pte & PTE_PBMT)) {
-            return TRANSLATE_FAIL;
-        }
-
-        if (!riscv_cpu_cfg(env)->ext_svnapot && (pte & PTE_N)) {
-            return TRANSLATE_FAIL;
-        }
-
-        *ppn = (pte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
-    }
-
-    return TRANSLATE_SUCCESS;
-}
-
 static int riscv_get_sstage_pte_addr(CPURISCVState *env, hwaddr *pte,
                                      hwaddr base, target_ulong idx, int ptesize,
                                      int sxlen_bytes, bool is_debug,
@@ -2061,9 +2144,8 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
     int ptshift = memres->ptshift;
     target_ulong *sbase = memres->sbase;
-    target_ulong idx;
+    target_ulong idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
     target_ulong spte;
-    target_ulong gpte = 0;
     hwaddr pte_addr, rgpte;
     int i;
 
@@ -2075,7 +2157,17 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         /* Always check spte is valid first */
         if (!check_spte_is_valid(env, base, idx, attrs, &res)) {
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": need refill\n", i, idx);
-            goto refill;
+
+            base = spte_get_gpte(env, sbase[i], attrs, &res);
+            if (res != MEMTX_OK) {
+                return TRANSLATE_FAIL;
+            }
+
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill at level %d: base " TARGET_FMT_lx "\n", i, base);
+
+            memres->refill = true;
+
+            goto end;
         }
 
         int sstage_ret = riscv_get_sstage_pte_addr(env, &spte, base, idx,
@@ -2145,9 +2237,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
                 return TRANSLATE_FAIL;
             }
 
-            env->shadow_hit++;
-
-            goto leaf;
+            break;
         }
 
         if (new_spte != spte) {
@@ -2167,7 +2257,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     }
     env->shadow_hit++;
 
- leaf:
+ end:
     if (memres) {
         memres->i = i;
         memres->ptshift = ptshift;
@@ -2178,142 +2268,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     }
 
     return TRANSLATE_FAIL;
-
- refill:
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: reill: start level %d\n", i);
-
-    for (;i >= 0; i--, ptshift += ptidxbits) {
-        gpte = spte_get_gpte(env, sbase[i], attrs, &res);
-
-        if (res != MEMTX_OK) {
-            return TRANSLATE_FAIL;
-        }
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: reill level %d: check gpte " TARGET_FMT_lx "\n", i, gpte);
-
-        if (gpte) {
-            base = gpte;
-            break;
-        }
-    }
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: reill at level %d: base " TARGET_FMT_lx "\n", i, base);
-
-    if (i < 0) {
-        return TRANSLATE_FAIL;
-    }
-
-    for (; i < levels; i++, ptshift -= ptidxbits) {
-        hwaddr cur_base = sbase[i];
-
-        /* if no current level cache */
-        if (cur_base == 0) {
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d: shadow PF\n", i);
-            /* raise page fault */
-        }
-
-        idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": loop start\n", i, idx);
-
-        int gstage_ret = riscv_get_gstage_pte_addr(env, &gpte, NULL, base,
-                                                   idx, ptesize, sxlen_bytes,
-                                                   fault_pte_addr, is_debug, attrs);
-        if (gstage_ret != TRANSLATE_SUCCESS) {
-            return gstage_ret;
-        }
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": guest pte " HWADDR_FMT_plx "\n", i, idx, gpte);
-
-        gstage_ret = riscv_get_pte_ppn(env, gpte, &ppn, pbmte);
-        if (gstage_ret != TRANSLATE_SUCCESS) {
-            return gstage_ret;
-        }
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": guest ppn " HWADDR_FMT_plx "\n", i, idx, ppn);
-
-        if (!(gpte & PTE_V)) {
-            /* Invalid PTE */
-            return TRANSLATE_FAIL;
-        }
-
-        /* refill is done when hit a huge frame */
-        if (gpte & (PTE_R | PTE_W | PTE_X)) {
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": found huge gpte\n", i, idx);
-
-            mark_spte_is_huge(env, sbase[i] + idx * ptesize, attrs, &res);
-            if (res != MEMTX_OK) {
-                return TRANSLATE_FAIL;
-            }
-
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": set huge gpte\n", i, idx);
-
-            break;
-        }
-
-        /* Inner PTE, continue walking */
-        if (gpte & (PTE_D | PTE_A | PTE_U | PTE_ATTR)) {
-            return TRANSLATE_FAIL;
-        }
-
-        base = ppn << PGSHIFT;
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": next guest level " HWADDR_FMT_plx "\n", i, idx, base);
-
-        // link to the last level of gpte
-        if (i == (levels - 1)) {
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": fill last level\n", i, idx);
-
-            fill_spte_leaf(env, sbase[levels - 1] + idx * ptesize,
-                           ppn << PTE_PPN_SHIFT, attrs, &res);
-
-            if (res != MEMTX_OK) {
-                return TRANSLATE_FAIL;
-            }
-
-            continue;
-        }
-
-        // get next level
-        int sstage_ret = riscv_get_sstage_pte_addr(env, &spte, sbase[i], idx,
-                                                   ptesize, sxlen_bytes,
-                                                   is_debug, attrs);
-        if (sstage_ret != TRANSLATE_SUCCESS) {
-            return sstage_ret;
-        }
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": spte " HWADDR_FMT_plx "\n", i, idx, spte);
-
-        sstage_ret = riscv_get_pte_ppn(env, spte, &ppn, pbmte);
-        if (sstage_ret != TRANSLATE_SUCCESS) {
-            return sstage_ret;
-        }
-
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": sppn " HWADDR_FMT_plx "\n", i, idx, ppn);
-
-        if (!ppn) { /* empty pte */
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": trigger SPF\n", i, idx);
-            /* TODO: trigger shadow page fault */
-            env->two_stage_shadow = true;
-            env->shadow_pf++;
-            return TRANSLATE_G_STAGE_FAIL;
-        }
-
-        // get next level shadow pfn
-        sbase[i + 1] = ppn << PGSHIFT;
-
-        // clean next level and fill gpte gptr
-        posion_spte(env, sbase[i + 1], &base);
-
-        spte_set_valid(env, sbase[i], idx, attrs, &res);
-        if (res != MEMTX_OK) {
-            return TRANSLATE_FAIL;
-        }
-    }
-
-    goto leaf;
-
-    return TRANSLATE_SUCCESS;
 }
 
 hwaddr riscv_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)

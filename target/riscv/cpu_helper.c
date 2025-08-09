@@ -1535,10 +1535,12 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     env->two_stage_shadow = false;
 
+    bool is_shadow = false;
     struct RISCVShadowMemRes memres;
     memset(&memres, 0, sizeof(memres));
     if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
         env->access_smt++;
+        is_shadow = true;
 
         int ret = riscv_get_shadow_physical_address(env, &memres, ret_prot,
                                                     addr, fault_pte_addr,
@@ -1606,6 +1608,10 @@ restart:
 
         if (res != MEMTX_OK) {
             return TRANSLATE_FAIL;
+        }
+
+        if (is_shadow) {
+            env->shadow_r++;
         }
 
         if (riscv_cpu_sxl(env) == MXL_RV32) {

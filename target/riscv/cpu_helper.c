@@ -1998,38 +1998,6 @@ static int riscv_get_pte_ppn(CPURISCVState *env, target_ulong pte,
     return TRANSLATE_SUCCESS;
 }
 
-static int riscv_get_gstage_pte_ppn(CPURISCVState *env, target_ulong *gpte, hwaddr *ppn,
-                                    hwaddr *gpte_addr, hwaddr base,
-                                    target_ulong idx, int ptesize,
-                                    int sxlen_bytes,
-                                    target_ulong *fault_pte_addr, bool is_debug, bool pbmte,
-                                    MemTxAttrs attrs)
-{
-
-    int gstage_ret = riscv_get_gstage_pte_addr(env, gpte, gpte_addr, base,
-                                                idx, ptesize, sxlen_bytes,
-                                                fault_pte_addr, is_debug, attrs);
-    if (gstage_ret != TRANSLATE_SUCCESS) {
-        return gstage_ret;
-    }
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: gstage pte ppn #" TARGET_FMT_lu ": guest pte " HWADDR_FMT_plx "\n", idx, *gpte);
-
-    gstage_ret = riscv_get_pte_ppn(env, *gpte, ppn, pbmte);
-    if (gstage_ret != TRANSLATE_SUCCESS) {
-        return gstage_ret;
-    }
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: gstage pte ppn #" TARGET_FMT_lu ": guest ppn " HWADDR_FMT_plx "\n", idx, *ppn);
-
-    if (!(*gpte & PTE_V)) {
-        /* Invalid PTE */
-        return TRANSLATE_FAIL;
-    }
-
-    return TRANSLATE_SUCCESS;
-}
-
 static int riscv_get_sstage_pte_addr(CPURISCVState *env, hwaddr *pte,
                                      hwaddr base, target_ulong idx, int ptesize,
                                      int sxlen_bytes, bool is_debug,
@@ -2261,12 +2229,25 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": loop start\n", i, idx);
 
-        int gstage_ret = riscv_get_gstage_pte_ppn(env, &gpte, &ppn, NULL, base,
-                                                  idx, ptesize, sxlen_bytes,
-                                                  fault_pte_addr, is_debug, pbmte,
-                                                  attrs);
+        int gstage_ret = riscv_get_gstage_pte_addr(env, &gpte, NULL, base,
+                                                   idx, ptesize, sxlen_bytes,
+                                                   fault_pte_addr, is_debug, attrs);
         if (gstage_ret != TRANSLATE_SUCCESS) {
             return gstage_ret;
+        }
+
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": guest pte " HWADDR_FMT_plx "\n", i, idx, gpte);
+
+        gstage_ret = riscv_get_pte_ppn(env, gpte, &ppn, pbmte);
+        if (gstage_ret != TRANSLATE_SUCCESS) {
+            return gstage_ret;
+        }
+
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": guest ppn " HWADDR_FMT_plx "\n", i, idx, ppn);
+
+        if (!(gpte & PTE_V)) {
+            /* Invalid PTE */
+            return TRANSLATE_FAIL;
         }
 
         /* refill is done when hit a huge frame */

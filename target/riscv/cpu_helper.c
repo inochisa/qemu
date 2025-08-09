@@ -1536,6 +1536,7 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     env->two_stage_shadow = false;
 
     bool is_shadow = false;
+    bool shadow_levels = levels - 1;
     struct RISCVShadowMemRes memres;
     memset(&memres, 0, sizeof(memres));
     memres.ptshift = ptshift;
@@ -1845,8 +1846,8 @@ restart:
                  ) << PGSHIFT) | (addr & ~TARGET_PAGE_MASK);
 
     // TODO: mark related spte as valid
-    if (memres.sbase) {
-        spte_set_valid(env, memres.sbase, memres.sidx, attrs, &res);
+    if (is_shadow && memres.i < shadow_levels) {
+        spte_set_valid(env, memres.sbase[memres.i], memres.sidx, attrs, &res);
     }
 
     /*
@@ -2059,7 +2060,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     }
 
     int ptshift = memres->ptshift;
-    target_ulong sbase[6] = {0, 0, 0, 0, 0, 0};
+    target_ulong *sbase = memres->sbase;
     target_ulong idx;
     target_ulong spte;
     target_ulong gpte = 0;
@@ -2268,10 +2269,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
             if (res != MEMTX_OK) {
                 return TRANSLATE_FAIL;
-            }
-
-            if (memres) {
-                memres->sbase = sbase[levels - 1];
             }
 
             continue;

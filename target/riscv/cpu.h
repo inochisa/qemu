@@ -629,18 +629,19 @@ bool riscv_cpu_option_set(const char *optname);
 
 #ifndef CONFIG_USER_ONLY
 struct RISCVShadowMemRes {
+    hwaddr sbase[6];
 	int i;
 	int ptshift;
     hwaddr base;
-    hwaddr sbase;
     int sidx;
 };
 
 int riscv_get_shadow_physical_address(CPURISCVState *env,
-									  struct RISCVShadowMemRes *memres,
-									  int *ret_prot, vaddr addr,
-									  target_ulong *fault_pte_addr,
-									  bool flush, bool is_debug);
+                                      struct RISCVShadowMemRes *memres,
+                                      int *ret_prot, vaddr addr,
+                                      target_ulong *fault_pte_addr,
+                                      int levels, int ptidxbits, int ptesize,
+                                      bool flush, bool is_debug);
 void riscv_cpu_flush_all_valid_map(CPURISCVState *env, hwaddr *gbase);
 void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr);
 void riscv_cpu_flush_spte_gptr(CPURISCVState *env);

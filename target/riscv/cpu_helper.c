@@ -1369,30 +1369,6 @@ static void fill_spte_leaf(CPURISCVState *env, hwaddr addr, target_ulong pte,
     riscv_cpu_store(env, addr, pte, attrs, res);
 }
 
-static int riscv_get_pte_ppn(CPURISCVState *env, target_ulong pte,
-                             hwaddr *ppn, bool pbmte)
-{
-    if (riscv_cpu_sxl(env) == MXL_RV32) {
-        *ppn = pte >> PTE_PPN_SHIFT;
-    } else {
-        if (pte & PTE_RESERVED) {
-            return TRANSLATE_FAIL;
-        }
-
-        if (!pbmte && (pte & PTE_PBMT)) {
-            return TRANSLATE_FAIL;
-        }
-
-        if (!riscv_cpu_cfg(env)->ext_svnapot && (pte & PTE_N)) {
-            return TRANSLATE_FAIL;
-        }
-
-        *ppn = (pte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
-    }
-
-    return TRANSLATE_SUCCESS;
-}
-
 /*
  * get_physical_address - get the physical address for this virtual address
  *
@@ -1733,9 +1709,11 @@ restart:
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": spte " HWADDR_FMT_plx "\n", i, idx, spte);
 
             hwaddr sppn;
-            int sstage_ret = riscv_get_pte_ppn(env, spte, &sppn, pbmte);
-            if (sstage_ret != TRANSLATE_SUCCESS) {
-                return sstage_ret;
+
+            if (riscv_cpu_sxl(env) == MXL_RV32) {
+                sppn = spte >> PTE_PPN_SHIFT;
+            } else {
+                sppn = (spte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
             }
 
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": sppn " HWADDR_FMT_plx "\n", i, idx, sppn);
@@ -2132,21 +2110,15 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
     hwaddr ppn;
 
-    CPUState *cs = env_cpu(env);
     hwaddr base = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     int sxlen = 16 << riscv_cpu_sxl(env);
     int sxlen_bytes = sxlen / 8;
-
-    bool pbmte = env->menvcfg & MENVCFG_PBMTE;
-    if (env->virt_enabled) {
-        pbmte = pbmte && (env->henvcfg & HENVCFG_PBMTE);
-    }
 
     int ptshift = memres->ptshift;
     target_ulong *sbase = memres->sbase;
     target_ulong idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
     target_ulong spte;
-    hwaddr pte_addr, rgpte;
+    hwaddr rgpte;
     int i;
 
     for (i = 0; i < levels; i++, ptshift -= ptidxbits) {
@@ -2158,7 +2130,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         if (!check_spte_is_valid(env, base, idx, attrs, &res)) {
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": need refill\n", i, idx);
 
-            base = spte_get_gpte(env, sbase[i], attrs, &res);
+            base = spte_get_gpte(env, base, attrs, &res);
             if (res != MEMTX_OK) {
                 return TRANSLATE_FAIL;
             }
@@ -2179,9 +2151,10 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": spte " HWADDR_FMT_plx "\n", i, idx, spte);
 
-        sstage_ret = riscv_get_pte_ppn(env, spte, &ppn, pbmte);
-        if (sstage_ret != TRANSLATE_SUCCESS) {
-            return sstage_ret;
+        if (riscv_cpu_sxl(env) == MXL_RV32) {
+            ppn = spte >> PTE_PPN_SHIFT;
+        } else {
+            ppn = (spte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
         }
 
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": ppn " HWADDR_FMT_plx "\n", i, idx, ppn);
@@ -2231,26 +2204,13 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         if(new_spte & PTE_V) { // is huge pte
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": is huge\n", i, idx);
 
-            base = spte_get_gpte(env, sbase[i], attrs, &res);
+            base = spte_get_gpte(env, base, attrs, &res);
 
             if (res != MEMTX_OK) {
                 return TRANSLATE_FAIL;
             }
 
             break;
-        }
-
-        if (new_spte != spte) {
-            MemoryRegion *mr;
-            hwaddr l = sxlen_bytes, addr1;
-
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": update " TARGET_FMT_lx " -> " TARGET_FMT_lx "\n", i, idx, spte, new_spte);
-
-            mr = address_space_translate(cs->as, pte_addr, &addr1, &l,
-                                        false, MEMTXATTRS_UNSPECIFIED);
-            target_ulong *pte_pa = qemu_map_ram_ptr(mr->ram_block, addr1);
-
-            *pte_pa = new_spte;
         }
 
         base = ppn << PGSHIFT;

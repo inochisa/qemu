@@ -1531,8 +1531,7 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     hwaddr pte_addr;
     int i = 0;
 
-    hwaddr sbase;
-    sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+    hwaddr sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     env->two_stage_shadow = false;
 
     bool is_shadow = false;
@@ -2110,39 +2109,39 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
     hwaddr ppn;
 
-    hwaddr base = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
+    hwaddr sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     int sxlen = 16 << riscv_cpu_sxl(env);
     int sxlen_bytes = sxlen / 8;
 
     int ptshift = memres->ptshift;
-    target_ulong *sbase = memres->sbase;
+    target_ulong *scbase = memres->sbase;
     target_ulong idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
     target_ulong spte;
     hwaddr rgpte;
     int i;
 
     for (i = 0; i < levels; i++, ptshift -= ptidxbits) {
-        sbase[i] = base;
+        scbase[i] = sbase;
 
         idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
 
         /* Always check spte is valid first */
-        if (!check_spte_is_valid(env, base, idx, attrs, &res)) {
+        if (!check_spte_is_valid(env, sbase, idx, attrs, &res)) {
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": need refill\n", i, idx);
 
-            base = spte_get_gpte(env, base, attrs, &res);
+            sbase = spte_get_gpte(env, sbase, attrs, &res);
             if (res != MEMTX_OK) {
                 return TRANSLATE_FAIL;
             }
 
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill at level %d: base " TARGET_FMT_lx "\n", i, base);
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill at level %d: base " TARGET_FMT_lx "\n", i, sbase);
 
             memres->refill = true;
 
             goto end;
         }
 
-        int sstage_ret = riscv_get_sstage_pte_addr(env, &spte, base, idx,
+        int sstage_ret = riscv_get_sstage_pte_addr(env, &spte, sbase, idx,
                                                    ptesize, sxlen_bytes,
                                                    is_debug, attrs);
         if (sstage_ret != TRANSLATE_SUCCESS) {
@@ -2162,7 +2161,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         target_ulong new_spte = spte;
 
         if (flush) {
-            hwaddr rgpt = spte_get_gpte(env, base, attrs, &res);
+            hwaddr rgpt = spte_get_gpte(env, sbase, attrs, &res);
 
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": enter flush\n", i, idx);
 
@@ -2184,19 +2183,19 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
             /* ignore invalid/deleted gpte */
             if (!(rgpte & PTE_V)) {
-                spte_set_invalid(env, base, idx, attrs, &res);
+                spte_set_invalid(env, sbase, idx, attrs, &res);
                 return TRANSLATE_SUCCESS;
             }
 
             /* just return if is a large pte */
             if (rgpte & (PTE_R | PTE_W | PTE_X)) {
-                spte_set_invalid(env, base, idx, attrs, &res);
+                spte_set_invalid(env, sbase, idx, attrs, &res);
                 return TRANSLATE_SUCCESS;
             }
 
             /* Inner PTE, just return */
             if (rgpte & (PTE_D | PTE_A | PTE_U | PTE_ATTR)) {
-                spte_set_invalid(env, base, idx, attrs, &res);
+                spte_set_invalid(env, sbase, idx, attrs, &res);
                 return TRANSLATE_SUCCESS;
             }
         }
@@ -2204,7 +2203,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         if(new_spte & PTE_V) { // is huge pte
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": is huge\n", i, idx);
 
-            base = spte_get_gpte(env, base, attrs, &res);
+            sbase = spte_get_gpte(env, sbase, attrs, &res);
 
             if (res != MEMTX_OK) {
                 return TRANSLATE_FAIL;
@@ -2213,7 +2212,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             break;
         }
 
-        base = ppn << PGSHIFT;
+        sbase = ppn << PGSHIFT;
     }
     env->shadow_hit++;
 
@@ -2221,7 +2220,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     if (memres) {
         memres->i = i;
         memres->ptshift = ptshift;
-        memres->base = base;
+        memres->base = sbase;
         memres->sidx = idx;
 
         return TRANSLATE_SUCCESS;

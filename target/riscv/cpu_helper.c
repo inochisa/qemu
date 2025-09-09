@@ -2077,7 +2077,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 {
     MemTxResult res;
     MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
-    hwaddr ppn;
+    hwaddr sppn;
 
     hwaddr sbase = (hwaddr)riscv_cpu_get_field(env, env->hssatp, SATP32_PPN, SATP64_PPN) << PGSHIFT;
     int sxlen = 16 << riscv_cpu_sxl(env);
@@ -2132,12 +2132,12 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": spte " HWADDR_FMT_plx "\n", i, idx, spte);
 
         if (riscv_cpu_sxl(env) == MXL_RV32) {
-            ppn = spte >> PTE_PPN_SHIFT;
+            sppn = spte >> PTE_PPN_SHIFT;
         } else {
-            ppn = (spte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
+            sppn = (spte & (target_ulong)PTE_PPN_MASK) >> PTE_PPN_SHIFT;
         }
 
-        qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": ppn " HWADDR_FMT_plx "\n", i, idx, ppn);
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": ppn " HWADDR_FMT_plx "\n", i, idx, sppn);
 
         target_ulong new_spte = spte;
 
@@ -2193,7 +2193,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             break;
         }
 
-        sbase = ppn << PGSHIFT;
+        sbase = sppn << PGSHIFT;
     }
     env->shadow_hit++;
 

@@ -2068,36 +2068,6 @@ static int riscv_get_gstage_pte_addr(CPURISCVState *env, target_ulong *pte,
     return TRANSLATE_SUCCESS;
 }
 
-static int riscv_get_sstage_pte_addr(CPURISCVState *env, hwaddr *pte,
-                                     hwaddr base, target_ulong idx, int ptesize,
-                                     int sxlen_bytes, bool is_debug,
-                                     MemTxAttrs attrs)
-{
-    hwaddr pte_addr;
-    MemTxResult result;
-
-    pte_addr = base + idx * ptesize;
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: sld #" TARGET_FMT_lu ": pte " HWADDR_FMT_plx "\n", idx, pte_addr);
-
-    int pmp_prot;
-    int pmp_ret = get_physical_address_pmp(env, &pmp_prot, pte_addr,
-                                           sxlen_bytes,
-                                           MMU_DATA_LOAD, PRV_S);
-    if (pmp_ret != TRANSLATE_SUCCESS) {
-        return TRANSLATE_PMP_FAIL;
-    }
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: sld #" TARGET_FMT_lu ": pass pmp\n", idx);
-
-    *pte = riscv_cpu_load(env, pte_addr, attrs, &result);
-    if (result != MEMTX_OK) {
-        return TRANSLATE_FAIL;
-    }
-
-    return TRANSLATE_SUCCESS;
-}
-
 int riscv_get_shadow_physical_address(CPURISCVState *env,
                                       struct RISCVShadowMemRes *memres,
                                       int *ret_prot, vaddr addr,
@@ -2141,11 +2111,22 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             goto end;
         }
 
-        int sstage_ret = riscv_get_sstage_pte_addr(env, &spte, sbase, idx,
-                                                   ptesize, sxlen_bytes,
-                                                   is_debug, attrs);
-        if (sstage_ret != TRANSLATE_SUCCESS) {
-            return sstage_ret;
+        hwaddr spte_addr = sbase + idx * ptesize;
+
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": pte " HWADDR_FMT_plx "\n", i, idx, spte_addr);
+
+        int pmp_prot;
+        int pmp_ret = get_physical_address_pmp(env, &pmp_prot, spte_addr,
+                                               sxlen_bytes, MMU_DATA_LOAD, PRV_S);
+        if (pmp_ret != TRANSLATE_SUCCESS) {
+            return TRANSLATE_PMP_FAIL;
+        }
+
+        qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": pass pmp\n", i, idx);
+
+        spte = riscv_cpu_load(env, spte_addr, attrs, &res);
+        if (res != MEMTX_OK) {
+            return TRANSLATE_FAIL;
         }
 
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": spte " HWADDR_FMT_plx "\n", i, idx, spte);

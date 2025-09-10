@@ -1541,7 +1541,7 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     memres.ptshift = ptshift;
     memres.refill = false;
 
-    if (first_stage && two_stage && env->virt_enabled && sbase != 0) {
+    if (first_stage && two_stage && !use_background && sbase != 0) {
         env->access_smt++;
         is_shadow = true;
 

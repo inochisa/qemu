@@ -2774,7 +2774,7 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                 tinst = (riscv_cpu_xlen(env) == 32) ? 0x00002000 : 0x00003000;
 
                 if (env->two_stage_shadow) {
-                    tinst |= 0x0010000;
+                    tinst |= (riscv_cpu_xlen(env) == 32) ? BIT(31) : BIT_ULL(63);
                 }
             } else {
                 /*
@@ -2798,7 +2798,7 @@ void riscv_cpu_do_interrupt(CPUState *cs)
                 tinst = (riscv_cpu_xlen(env) == 32) ? 0x00002000 : 0x00003000;
 
                 if (env->two_stage_shadow) {
-                    tinst |= 0x0010000;
+                    tinst |= (riscv_cpu_xlen(env) == 32) ? BIT(31) : BIT_ULL(63);
                 }
             }
             break;

@@ -5005,35 +5005,64 @@ static RISCVException write_hgatp(CPURISCVState *env, int csrno,
     return RISCV_EXCP_NONE;
 }
 
-static RISCVException read_hgdtctl(CPURISCVState *env, int csrno,
-                                 target_ulong *val)
+static RISCVException shgdt(CPURISCVState *env, int csrno)
 {
-    /* TODO: smstateen and valid check */
+    RISCVException ret;
+
+    ret = hmode(env, csrno);
+    if (ret != RISCV_EXCP_NONE) {
+        return ret;
+    }
+
+    if(!riscv_cpu_cfg(env)->ext_shgdt) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+
+    return smstateen_acc_ok(env, 0, SMSTATEEN0_DTL);
+}
+
+static RISCVException read_hgdtctl(CPURISCVState *env, int csrno,
+                                   target_ulong *val)
+{
     *val = env->hgdtctl;
     return RISCV_EXCP_NONE;
 }
 
 static RISCVException write_hgdtctl(CPURISCVState *env, int csrno,
-                                   target_ulong val, uintptr_t ra)
+                                    target_ulong val, uintptr_t ra)
 {
-    /* TODO: smstateen and valid check */
+    target_ulong size = get_field(val, HGDTCTL_SIZE);
+    hwaddr ppn;
+
+    if (size > HGDTCTL_SIZE_MAX) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+
+    if (riscv_cpu_mxl(env) == MXL_RV32) {
+        ppn = get_field(val, HGDTCTL32_PPN);
+    } else {
+        ppn = get_field(val, HGDTCTL64_PPN);
+    }
+
+    if (ppn & ((1 << size) - 1)) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+
     env->hgdtctl = val;
     return RISCV_EXCP_NONE;
 }
 
 static RISCVException read_hgdts(CPURISCVState *env, int csrno,
-                                   target_ulong *val)
+                                 target_ulong *val)
 {
-    /* TODO: smstateen and valid check */
     *val = env->hgdts;
     return RISCV_EXCP_NONE;
 }
 
 static RISCVException write_hgdts(CPURISCVState *env, int csrno,
-                                    target_ulong val, uintptr_t ra)
+                                  target_ulong val, uintptr_t ra)
 {
-    /* TODO: smstateen and valid check */
-    env->hgdts = 0;
+    env->hgdts = val;
     return RISCV_EXCP_NONE;
 }
 
@@ -6177,9 +6206,9 @@ riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HGATP]       = { "hgatp",       hgatp,   read_hgatp,   write_hgatp,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
-    [CSR_HGDTCTL]     = { "hgdtctl",     hmode,   read_hgdtctl, write_hgdtctl,
+    [CSR_HGDTCTL]     = { "hgdtctl",     shgdt,   read_hgdtctl, write_hgdtctl,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
-    [CSR_HGDTS]       = { "hgdts",       hmode,   read_hgdts,   write_hgdts,
+    [CSR_HGDTS]       = { "hgdts",       shgdt,   read_hgdts,   write_hgdts,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HTIMEDELTA]  = { "htimedelta",  hmode,   read_htimedelta,
                           write_htimedelta,

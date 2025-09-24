@@ -1237,6 +1237,9 @@ static void write_dirty_log(CPURISCVState *env, hwaddr gpa, hwaddr gpte)
     } else {
         qatomic_set((uint64_t *)log_pa, cpu_to_le64(gpa));
     }
+
+    qemu_log("log entry %u, with gfn 0x%016" HWADDR_PRIx " pte 0x%016" HWADDR_PRIx "\n",
+                index, gpa, gpte);
 }
 
 static bool check_dirty_log_update(CPURISCVState *env)

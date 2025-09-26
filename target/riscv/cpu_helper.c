@@ -1212,6 +1212,44 @@ static bool check_svukte_addr(CPURISCVState *env, vaddr addr)
     return !high_bit;
 }
 
+static void write_dirty_log(CPURISCVState *env, hwaddr gpa, hwaddr gpte)
+{
+    CPUState *cs = env_cpu(env);
+    unsigned int index = get_field(env->hgdts, HGDTS_INDEX);
+    int sxlen_bytes = riscv_cpu_xlen(env) / 8;
+    hwaddr l = sxlen_bytes, log_addr, addr1;
+    MemoryRegion *mr;
+
+    if (riscv_cpu_mxl(env) == MXL_RV32) {
+        log_addr = (hwaddr)get_field(env->hgdtctl, HGDTCTL32_PPN) << HGDTCTL_PPN_SHIFT;
+    } else {
+        log_addr = (hwaddr)get_field(env->hgdtctl, HGDTCTL64_PPN) << HGDTCTL_PPN_SHIFT;
+    }
+
+    log_addr += index * l;
+
+    mr = address_space_translate(cs->as, log_addr, &addr1, &l, true, MEMTXATTRS_UNSPECIFIED);
+
+    void *log_pa = qemu_map_ram_ptr(mr->ram_block, addr1);
+
+    if (riscv_cpu_sxl(env) == MXL_RV32) {
+        qatomic_set((uint32_t *)log_pa, cpu_to_le32(gpa));
+    } else {
+        qatomic_set((uint64_t *)log_pa, cpu_to_le64(gpa));
+    }
+}
+
+static void update_dirty_log_index(CPURISCVState *env)
+{
+    int sxlen_bytes = riscv_cpu_xlen(env) / 8;
+    target_long index = env->hgdts & HGDTS_INDEX;
+    target_long size = (1 << (HGDTCTL_SIZE_SHIFT + get_field(env->hgdtctl, HGDTCTL_SIZE))) / sxlen_bytes;
+
+    env->hgdts = index + 1;
+
+    qemu_log("hgdts: "TARGET_FMT_lx" " TARGET_FMT_lx "/" TARGET_FMT_lx "\n", env->hgdts, index, size);
+}
+
 /*
  * get_physical_address - get the physical address for this virtual address
  *
@@ -1616,9 +1654,16 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
         hwaddr l = sxlen_bytes, addr1;
         mr = address_space_translate(cs->as, pte_addr, &addr1, &l,
                                      false, MEMTXATTRS_UNSPECIFIED);
+        bool shgdt = riscv_cpu_cfg(env)->ext_shgdt && (env->hgdtctl & HGDTCTL_EN);
+        bool record_dirty_log = shgdt && two_stage && !first_stage && ((updated_pte ^ pte) & (updated_pte & PTE_D));
         if (memory_region_is_ram(mr)) {
             target_ulong *pte_pa = qemu_map_ram_ptr(mr->ram_block, addr1);
             target_ulong old_pte;
+
+            if (record_dirty_log) {
+                write_dirty_log(env, addr & (~TARGET_PAGE_MASK), pte_addr);
+            }
+
             if (riscv_cpu_sxl(env) == MXL_RV32) {
                 old_pte = qatomic_cmpxchg((uint32_t *)pte_pa, cpu_to_le32(pte), cpu_to_le32(updated_pte));
                 old_pte = le32_to_cpu(old_pte);
@@ -1630,6 +1675,10 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
                 goto restart;
             }
             pte = updated_pte;
+
+            if (record_dirty_log) {
+                update_dirty_log_index(env);
+            }
         } else {
             /*
              * Misconfigured PTE in ROM (AD bits are not preset) or

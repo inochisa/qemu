@@ -5064,6 +5064,68 @@ static RISCVException write_hgatp(CPURISCVState *env, int csrno,
     return RISCV_EXCP_NONE;
 }
 
+static RISCVException shdlt(CPURISCVState *env, int csrno)
+{
+    RISCVException ret;
+
+    if (!env_archcpu(env)->cfg.ext_shdlt) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+
+    ret = smstateen_acc_ok(env, 0, SMSTATEEN0_DLT);
+    if (ret != RISCV_EXCP_NONE) {
+        return ret;
+    }
+
+    return hmode(env, csrno);
+}
+
+static RISCVException read_hdltctl(CPURISCVState *env, int csrno,
+                                   target_ulong *val)
+{
+    *val = env->hdltctl;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_hdltctl(CPURISCVState *env, int csrno,
+                                    target_ulong val, uintptr_t ra)
+{
+    uint64_t size = get_field(val, HDLTCTL_SIZE);
+    uint64_t addr;
+
+    if (riscv_cpu_mxl(env) == MXL_RV32) {
+        addr = get_field(val, HDLTCTL32_PPN);
+    } else {
+        addr = get_field(val, HDLTCTL64_PPN);
+    }
+
+    if (size > HDLTCTL_SIZE_MAX) {
+        size = HDLTCTL_SIZE_MAX;
+    }
+
+    if (addr & ((1 << size) - 1)) {
+        return RISCV_EXCP_ILLEGAL_INST;
+    }
+
+    val = set_field(val, HDLTCTL_SIZE, size);
+    env->hdltctl = val;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException read_hdltidx(CPURISCVState *env, int csrno,
+                                   target_ulong *val)
+{
+    *val = env->hdltidx;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_hdltidx(CPURISCVState *env, int csrno,
+                                    target_ulong val, uintptr_t ra)
+{
+    env->hdltidx = val;
+    return RISCV_EXCP_NONE;
+}
+
 static RISCVException read_htimedelta(CPURISCVState *env, int csrno,
                                       target_ulong *val)
 {
@@ -6209,6 +6271,10 @@ riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_HGEIP]       = { "hgeip",       hmode,   read_hgeip,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HGATP]       = { "hgatp",       hgatp,   read_hgatp,   write_hgatp,
+                          .min_priv_ver = PRIV_VERSION_1_12_0                },
+    [CSR_HDLTCTL]     = { "hdltctl",     shdlt,   read_hdltctl, write_hdltctl,
+                          .min_priv_ver = PRIV_VERSION_1_12_0                },
+    [CSR_HDLTIDX]     = { "hdltidx",     shdlt,   read_hdltidx, write_hdltidx,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HTIMEDELTA]  = { "htimedelta",  hmode,   read_htimedelta,
                           write_htimedelta,

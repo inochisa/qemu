@@ -392,6 +392,8 @@ struct CPUArchState {
     uint64_t hgatp;
     uint64_t hgeie;
     uint64_t hgeip;
+    uint64_t hdltctl;
+    uint32_t hdltidx;
     uint64_t htimedelta;
     uint64_t hvien;
 

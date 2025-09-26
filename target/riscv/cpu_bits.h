@@ -271,6 +271,9 @@
 #define CSR_HTINST          0x64A
 #define CSR_HGEIP           0xE12
 #define CSR_HGATP           0x680
+#define CSR_HGDTCTL         0x681
+#define CSR_HGDTS           0x682
+
 #define CSR_HTIMEDELTA      0x605
 #define CSR_HTIMEDELTAH     0x615
 
@@ -355,6 +358,7 @@
 #define SMSTATEEN0_CS       (1ULL << 0)
 #define SMSTATEEN0_FCSR     (1ULL << 1)
 #define SMSTATEEN0_JVT      (1ULL << 2)
+#define SMSTATEEN0_DTL      (1ULL << 53)
 #define SMSTATEEN0_CTR      (1ULL << 54)
 #define SMSTATEEN0_P1P13    (1ULL << 56)
 #define SMSTATEEN0_HSCONTXT (1ULL << 57)
@@ -782,6 +786,7 @@ typedef enum RISCVException {
     RISCV_EXCP_LOAD_GUEST_ACCESS_FAULT = 0x15,
     RISCV_EXCP_VIRT_INSTRUCTION_FAULT = 0x16,
     RISCV_EXCP_STORE_GUEST_AMO_ACCESS_FAULT = 0x17,
+    RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT = 0x18,
     RISCV_EXCP_SEMIHOST = 0x3f,
 } RISCVException;
 
@@ -1164,4 +1169,16 @@ typedef enum CTRType {
 #define MCONTEXT64                         0x0000000000001FFFULL
 #define MCONTEXT32_HCONTEXT                0x0000007F
 #define MCONTEXT64_HCONTEXT                0x0000000000003FFFULL
+
+/* HGPMTQ bits and mask */
+#define HGDTCTL_EN                         BIT(0)
+#define HGDTCTL_SIZE                       0x0000001E
+#define HGDTCTL_SIZE_SHIFT                 12
+#define HGDTCTL32_PPN                      0xFFFFFC00
+#define HGDTCTL64_PPN                      0x003FFFFFFFFFFC00ULL
+#define HGDTCTL_PPN_SHIFT                  12
+#define HGDTCTL_SIZE_MAX                   9
+
+#define HGDTS_INDEX                        0x0007FFFF
+
 #endif

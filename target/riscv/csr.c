@@ -5005,6 +5005,38 @@ static RISCVException write_hgatp(CPURISCVState *env, int csrno,
     return RISCV_EXCP_NONE;
 }
 
+static RISCVException read_hgdtctl(CPURISCVState *env, int csrno,
+                                 target_ulong *val)
+{
+    /* TODO: smstateen and valid check */
+    *val = env->hgdtctl;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_hgdtctl(CPURISCVState *env, int csrno,
+                                   target_ulong val, uintptr_t ra)
+{
+    /* TODO: smstateen and valid check */
+    env->hgdtctl = val;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException read_hgdts(CPURISCVState *env, int csrno,
+                                   target_ulong *val)
+{
+    /* TODO: smstateen and valid check */
+    *val = env->hgdts;
+    return RISCV_EXCP_NONE;
+}
+
+static RISCVException write_hgdts(CPURISCVState *env, int csrno,
+                                    target_ulong val, uintptr_t ra)
+{
+    /* TODO: smstateen and valid check */
+    env->hgdts = 0;
+    return RISCV_EXCP_NONE;
+}
+
 static RISCVException read_htimedelta(CPURISCVState *env, int csrno,
                                       target_ulong *val)
 {
@@ -6144,6 +6176,10 @@ riscv_csr_operations csr_ops[CSR_TABLE_SIZE] = {
     [CSR_HGEIP]       = { "hgeip",       hmode,   read_hgeip,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HGATP]       = { "hgatp",       hgatp,   read_hgatp,   write_hgatp,
+                          .min_priv_ver = PRIV_VERSION_1_12_0                },
+    [CSR_HGDTCTL]     = { "hgdtctl",     hmode,   read_hgdtctl, write_hgdtctl,
+                          .min_priv_ver = PRIV_VERSION_1_12_0                },
+    [CSR_HGDTS]       = { "hgdts",       hmode,   read_hgdts,   write_hgdts,
                           .min_priv_ver = PRIV_VERSION_1_12_0                },
     [CSR_HTIMEDELTA]  = { "htimedelta",  hmode,   read_htimedelta,
                           write_htimedelta,

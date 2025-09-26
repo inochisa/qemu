@@ -139,6 +139,7 @@ enum {
     TRANSLATE_PMP_FAIL,
     TRANSLATE_G_STAGE_FAIL,
     TRANSLATE_PMA_FAIL,
+    TRANSLATE_DIRTY_LOG_FAIL,
 };
 
 /* Extension context status */

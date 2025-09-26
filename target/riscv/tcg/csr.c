@@ -1835,6 +1835,7 @@ static const uint64_t all_ints = M_MODE_INTERRUPTS | S_MODE_INTERRUPTS |
                          (1ULL << (RISCV_EXCP_LOAD_PAGE_FAULT)) | \
                          (1ULL << (RISCV_EXCP_STORE_PAGE_FAULT)) | \
                          (1ULL << (RISCV_EXCP_SW_CHECK)) | \
+                         (1ULL << (RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT)) | \
                          (1ULL << (RISCV_EXCP_INST_GUEST_PAGE_FAULT)) | \
                          (1ULL << (RISCV_EXCP_LOAD_GUEST_ACCESS_FAULT)) | \
                          (1ULL << (RISCV_EXCP_VIRT_INSTRUCTION_FAULT)) | \
@@ -1843,6 +1844,7 @@ static const target_ulong vs_delegable_excps = DELEGABLE_EXCPS &
     ~((1ULL << (RISCV_EXCP_S_ECALL)) |
       (1ULL << (RISCV_EXCP_VS_ECALL)) |
       (1ULL << (RISCV_EXCP_M_ECALL)) |
+      (1ULL << (RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT)) |
       (1ULL << (RISCV_EXCP_INST_GUEST_PAGE_FAULT)) |
       (1ULL << (RISCV_EXCP_LOAD_GUEST_ACCESS_FAULT)) |
       (1ULL << (RISCV_EXCP_VIRT_INSTRUCTION_FAULT)) |

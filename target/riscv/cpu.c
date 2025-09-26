@@ -392,6 +392,7 @@ static const char * const riscv_excp_names[] = {
     [RISCV_EXCP_LOAD_GUEST_ACCESS_FAULT] = "guest_load_page_fault",
     [RISCV_EXCP_VIRT_INSTRUCTION_FAULT] = "virt_illegal_instruction",
     [RISCV_EXCP_STORE_GUEST_AMO_ACCESS_FAULT] = "guest_store_page_fault",
+    [RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT] = "dirty_log_buffer_fault",
     [RISCV_EXCP_SEMIHOST] = "semihost",
 };
 

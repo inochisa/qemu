@@ -1248,6 +1248,15 @@ static int write_dirty_log(CPURISCVState *env, hwaddr gpa, hwaddr gpte)
     return TRANSLATE_SUCCESS;
 }
 
+static bool check_dirty_log_update(CPURISCVState *env)
+{
+    int sxlen_bytes = riscv_cpu_xlen(env) / 8;
+    target_long size = (1 << (HGDLTCTL_SIZE_SHIFT + get_field(env->hgdltctl, HGDLTCTL_SIZE))) / sxlen_bytes;
+    target_long index = env->hgdltidx & HGDLTIDX_INDEX;
+
+    return index < size;
+}
+
 static void update_dirty_log_index(CPURISCVState *env)
 {
     int sxlen_bytes = riscv_cpu_xlen(env) / 8;
@@ -1443,6 +1452,10 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
                                                  base, NULL, MMU_DATA_LOAD,
                                                  MMUIdx_U, false, true,
                                                  is_debug, false);
+
+            if (vbase_ret == TRANSLATE_DIRTY_LOG_FAIL) {
+                return TRANSLATE_DIRTY_LOG_FAIL;
+            }
 
             if (vbase_ret != TRANSLATE_SUCCESS) {
                 if (fault_pte_addr) {
@@ -1679,6 +1692,9 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
             int ret = TRANSLATE_SUCCESS;
 
             if (record_dirty_log) {
+                if (check_dirty_log_update(env))
+                    return TRANSLATE_DIRTY_LOG_FAIL;
+
                 ret = write_dirty_log(env, addr & (~TARGET_PAGE_MASK), pte_addr);
             }
 
@@ -1740,6 +1756,7 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
 
 static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
                                 MMUAccessType access_type, bool pmp_violation,
+                                bool dirty_log_fault,
                                 bool first_stage, bool two_stage,
                                 bool two_stage_indirect)
 {
@@ -1749,6 +1766,8 @@ static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
     case MMU_INST_FETCH:
         if (pmp_violation) {
             cs->exception_index = RISCV_EXCP_INST_ACCESS_FAULT;
+        } else if (dirty_log_fault) {
+            cs->exception_index = RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT;
         } else if (env->virt_enabled && !first_stage) {
             cs->exception_index = RISCV_EXCP_INST_GUEST_PAGE_FAULT;
         } else {
@@ -1758,6 +1777,8 @@ static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
     case MMU_DATA_LOAD:
         if (pmp_violation) {
             cs->exception_index = RISCV_EXCP_LOAD_ACCESS_FAULT;
+        } else if (dirty_log_fault) {
+            cs->exception_index = RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT;
         } else if (two_stage && !first_stage) {
             cs->exception_index = RISCV_EXCP_LOAD_GUEST_ACCESS_FAULT;
         } else {
@@ -1767,6 +1788,8 @@ static void raise_mmu_exception(CPURISCVState *env, target_ulong address,
     case MMU_DATA_STORE:
         if (pmp_violation) {
             cs->exception_index = RISCV_EXCP_STORE_AMO_ACCESS_FAULT;
+        } else if (dirty_log_fault) {
+            cs->exception_index = RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT;
         } else if (two_stage && !first_stage) {
             cs->exception_index = RISCV_EXCP_STORE_GUEST_AMO_ACCESS_FAULT;
         } else {
@@ -1892,6 +1915,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     hwaddr pa = 0;
     int prot, prot2, prot_pmp;
     bool pmp_violation = false;
+    bool dirty_log_fault = false;
     bool first_stage_error = true;
     bool two_stage_lookup = mmuidx_2stage(mmu_idx);
     bool two_stage_indirect_error = false;
@@ -1917,7 +1941,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
          * And the env->guest_phys_fault_addr has already been set in
          * get_physical_address().
          */
-        if (ret == TRANSLATE_G_STAGE_FAIL) {
+        if (ret == TRANSLATE_G_STAGE_FAIL || ret == TRANSLATE_DIRTY_LOG_FAIL) {
             first_stage_error = false;
             two_stage_indirect_error = true;
         }
@@ -1996,6 +2020,10 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
         pmp_violation = true;
     }
 
+    if (ret == TRANSLATE_DIRTY_LOG_FAIL) {
+        dirty_log_fault = true;
+    }
+
     if (ret == TRANSLATE_SUCCESS) {
         tlb_set_page(cs, address & ~(tlb_size - 1), pa & ~(tlb_size - 1),
                      prot, mmu_idx, tlb_size);
@@ -2021,6 +2049,7 @@ bool riscv_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
                              wp_access, retaddr);
 
         raise_mmu_exception(env, address, access_type, pmp_violation,
+                            dirty_log_fault,
                             first_stage_error, two_stage_lookup,
                             two_stage_indirect_error);
         cpu_loop_exit_restore(cs, retaddr);
@@ -2370,6 +2399,9 @@ void riscv_cpu_do_interrupt(CPUState *cs)
         case RISCV_EXCP_ILLEGAL_INST:
         case RISCV_EXCP_VIRT_INSTRUCTION_FAULT:
             tval = env->bins;
+            break;
+        /* TODO: maybe unused ? */
+        case RISCV_EXCP_DIRTY_LOG_BUFFER_FAULT:
             break;
         case RISCV_EXCP_BREAKPOINT:
             tval = env->badaddr;

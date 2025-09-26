@@ -126,6 +126,7 @@ BOOL_FIELD(ext_svade)
 BOOL_FIELD(ext_zic64b)
 BOOL_FIELD(ext_ssstateen)
 BOOL_FIELD(ext_sha)
+BOOL_FIELD(ext_shgdt)
 
 /*
  * Always 'true' booleans for named features

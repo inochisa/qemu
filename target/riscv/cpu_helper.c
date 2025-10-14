@@ -1216,9 +1216,9 @@ static inline target_ulong get_spte_info(CPURISCVState *env,
                                          hwaddr base, hwaddr offset,
                                          MemTxAttrs attrs, MemTxResult *res)
 {
-    hwaddr espte_addr = base + offset;
+    hwaddr addr = base + offset;
 
-    return riscv_cpu_load(env, espte_addr, attrs, res);
+    return riscv_cpu_load(env, addr, attrs, res);
 }
 
 static inline void set_spte_info(CPURISCVState *env,
@@ -1545,9 +1545,10 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
     bool is_shadow = false;
     int shadow_levels = levels - 1;
     struct RISCVShadowMemRes memres;
-    memset(&memres, 0, sizeof(memres));
     memres.ptshift = ptshift;
     memres.refill = false;
+    memres.i = 0;
+    memres.sidx = -1;
 
     if (first_stage && two_stage && !use_background && sbase != 0) {
         env->access_smt++;
@@ -1735,14 +1736,12 @@ restart:
             if (i == shadow_levels - 1) {
                 qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": fill last level\n", i, idx);
 
-                fill_spte_leaf(env, cur_sbase + idx * ptesize,
-                               ppn << PTE_PPN_SHIFT, attrs, &res);
+                fill_spte_leaf(env, spte_addr, ppn << PTE_PPN_SHIFT,
+                               attrs, &res);
 
                 if (res != MEMTX_OK) {
                     return TRANSLATE_FAIL;
                 }
-
-                memres.sidx = -1;
             } else {
                 /* get next level shadow pfn */
                 memres.sbase[i + 1] = sppn << PGSHIFT;
@@ -2147,8 +2146,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
 
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": ppn " HWADDR_FMT_plx "\n", i, idx, sppn);
 
-        target_ulong new_spte = spte;
-
         if (flush) {
             hwaddr rgpt = spte_get_gpte(env, sbase, attrs, &res);
 
@@ -2189,7 +2186,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             }
         }
 
-        if(new_spte & PTE_V) { // is huge pte
+        if(spte & PTE_V) { // is huge pte
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": is huge\n", i, idx);
 
             sbase = spte_get_gpte(env, sbase, attrs, &res);
@@ -2201,6 +2198,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
             break;
         }
 
+        // Inner PTE, continue walking
         sbase = sppn << PGSHIFT;
     }
     env->shadow_hit++;
@@ -2210,7 +2208,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         memres->i = i;
         memres->ptshift = ptshift;
         memres->base = sbase;
-        memres->sidx = idx;
 
         return TRANSLATE_SUCCESS;
     }

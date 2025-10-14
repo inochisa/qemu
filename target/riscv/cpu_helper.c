@@ -1270,7 +1270,7 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
 {
     target_ulong value;
     int size = riscv_cpu_xlen(env);
-    int offset = (idx / size) * size / 8;
+    int offset = (idx & (size - 1)) / 8;
 
     value = get_spte_info(env, base, SPTE_VALID_MAP + offset,
                           attrs, res);
@@ -1279,7 +1279,7 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
         return false;
     }
 
-    return value & (1 << (idx % size));
+    return (value >> (idx % size)) & 1;
 }
 
 static target_ulong spte_get_gpte(CPURISCVState *env, hwaddr base,
@@ -1318,7 +1318,11 @@ static void posion_spte(CPURISCVState *env, hwaddr base, hwaddr *gbase)
     // posion the valid map
     for (int i = 0; i < opnum; i++) {
         void *addr = pte + (SPTE_VALID_MAP - SEPTE_OFFSET) + opsize * i;
-        qatomic_set((target_ulong *)addr, 0);
+        if (riscv_cpu_sxl(env) == MXL_RV32) {
+            qatomic_set((uint32_t *)addr, 0);
+        } else {
+            qatomic_set((uint64_t *)addr, 0);
+        }
     }
     // memset(pte + (SPTE_VALID_MAP - SEPTE_OFFSET), 0x00, size);
 
@@ -1328,7 +1332,11 @@ static void posion_spte(CPURISCVState *env, hwaddr base, hwaddr *gbase)
     if (gbase) {
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: posion set gpte addr " HWADDR_FMT_plx "\n", *gbase);
 
-        qatomic_set((target_ulong *)(pte + (SPTE_GPTE_PTR - SEPTE_OFFSET)), *gbase);
+        if (riscv_cpu_sxl(env) == MXL_RV32) {
+            qatomic_set((uint32_t *)(pte + (SPTE_GPTE_PTR - SEPTE_OFFSET)), *gbase);
+        } else {
+            qatomic_set((uint64_t *)(pte + (SPTE_GPTE_PTR - SEPTE_OFFSET)), *gbase);
+        }
     }
 
     env->shadow_posion++;

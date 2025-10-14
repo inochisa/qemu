@@ -629,7 +629,6 @@ bool riscv_cpu_option_set(const char *optname);
 
 #ifndef CONFIG_USER_ONLY
 struct RISCVShadowMemRes {
-    hwaddr sbase[6];
 	int i;
 	int ptshift;
     hwaddr base;

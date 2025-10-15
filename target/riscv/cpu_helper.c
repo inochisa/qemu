@@ -1728,6 +1728,11 @@ restart:
                 qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": trigger SPF\n", i, idx);
                 env->two_stage_shadow = true;
                 env->shadow_pf++;
+
+                if (fault_pte_addr) {
+                    *fault_pte_addr = pte_addr >> 2;
+                }
+
                 return TRANSLATE_G_STAGE_FAIL;
             }
 

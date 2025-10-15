@@ -1700,6 +1700,8 @@ restart:
             hwaddr cur_sbase = memres.base;
             hwaddr spte_addr = cur_sbase + idx * ptesize;
 
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": sbase " HWADDR_FMT_plx " spte addr " HWADDR_FMT_plx "\n", i, idx, cur_sbase, spte_addr);
+
             pmp_ret = get_physical_address_pmp(env, &pmp_prot, pte_addr,
                                                sxlen_bytes,
                                                MMU_DATA_LOAD, PRV_S);

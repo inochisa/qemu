@@ -632,6 +632,7 @@ struct RISCVShadowMemRes {
 	int i;
 	int ptshift;
     hwaddr base;
+    hwaddr sbase;
     int sidx;
     bool refill;
 };

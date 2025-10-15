@@ -1671,7 +1671,7 @@ restart:
             if (memres.refill && i < shadow_levels) {
                 qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": fill huge level\n", i, idx);
 
-                mark_spte_is_huge(env, memres.base + idx * ptesize, attrs, &res);
+                mark_spte_is_huge(env, memres.sbase + idx * ptesize, attrs, &res);
                 if (res != MEMTX_OK) {
                     return TRANSLATE_FAIL;
                 }
@@ -1697,7 +1697,7 @@ restart:
         base = ppn << PGSHIFT;
 
         if (memres.refill && i < shadow_levels) {
-            hwaddr cur_sbase = memres.base;
+            hwaddr cur_sbase = memres.sbase;
             hwaddr spte_addr = cur_sbase + idx * ptesize;
 
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: refill %d, #" TARGET_FMT_lu ": sbase " HWADDR_FMT_plx " spte addr " HWADDR_FMT_plx "\n", i, idx, cur_sbase, spte_addr);
@@ -1749,10 +1749,10 @@ restart:
                 }
             } else {
                 /* get next level shadow pfn */
-                memres.base = sppn << PGSHIFT;
+                memres.sbase = sppn << PGSHIFT;
 
                 /* clean next level and fill gpte gptr */
-                posion_spte(env, memres.base, &base);
+                posion_spte(env, memres.sbase, &base);
             }
 
             /* set valid as we already find a valid next level ptr */
@@ -1940,9 +1940,9 @@ restart:
                  ) << PGSHIFT) | (addr & ~TARGET_PAGE_MASK);
 
     if (memres.refill && memres.sidx > 0 && memres.i < shadow_levels) {
-        spte_set_valid(env, memres.base, memres.sidx, attrs, &res);
+        spte_set_valid(env, memres.sbase, memres.sidx, attrs, &res);
         if (res == MEMTX_OK) {
-            qemu_log_mask(CPU_LOG_SMMU, "SMMU: update %d, #%d: update base 0x%016" HWADDR_PRIx "\n", memres.i, memres.sidx, memres.base);
+            qemu_log_mask(CPU_LOG_SMMU, "SMMU: update %d, #%d: update base 0x%016" HWADDR_PRIx "\n", memres.i, memres.sidx, memres.sbase);
         }
     }
 
@@ -2102,6 +2102,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
     int i;
 
     for (i = 0; i < levels; i++, ptshift -= ptidxbits) {
+        memres->sbase = sbase;
         idx = (addr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
 
         /* Always check spte is valid first */

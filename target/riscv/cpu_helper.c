@@ -1939,7 +1939,7 @@ restart:
                   (vpn & (((target_ulong)1 << ptshift) - 1))
                  ) << PGSHIFT) | (addr & ~TARGET_PAGE_MASK);
 
-    if (memres.refill && memres.sidx > 0 && memres.i < shadow_levels) {
+    if (memres.refill && memres.sidx >= 0 && memres.i < shadow_levels) {
         spte_set_valid(env, memres.sbase, memres.sidx, attrs, &res);
         if (res == MEMTX_OK) {
             qemu_log_mask(CPU_LOG_SMMU, "SMMU: update %d, #%d: update base 0x%016" HWADDR_PRIx "\n", memres.i, memres.sidx, memres.sbase);

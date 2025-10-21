@@ -1567,6 +1567,10 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
         ptshift = memres.ptshift;
         base = memres.base;
 
+        if (!memres.refill) {
+            env->shadow_hit++;
+        }
+
         qemu_log_mask(CPU_LOG_SMMU, "SMMU: found level %d with ptshift %d, base 0x%016" HWADDR_PRIx "\n", i, ptshift, base);
     }
 
@@ -2204,8 +2208,6 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         // Inner PTE, continue walking
         sbase = sppn << PGSHIFT;
     }
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": hit\n", i, idx);
-    env->shadow_hit++;
 
  end:
     if (memres) {

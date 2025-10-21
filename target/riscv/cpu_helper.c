@@ -2204,6 +2204,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
         // Inner PTE, continue walking
         sbase = sppn << PGSHIFT;
     }
+    qemu_log_mask(CPU_LOG_SMMU, "SMMU: level %d, #" TARGET_FMT_lu ": hit\n", i, idx);
     env->shadow_hit++;
 
  end:

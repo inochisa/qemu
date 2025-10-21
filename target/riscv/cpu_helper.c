@@ -1246,7 +1246,7 @@ static void spte_set_validmap(CPURISCVState *env, hwaddr base, target_ulong idx,
 {
     int size = riscv_cpu_xlen(env);
     int offset = (idx & (size - 1)) / 8;
-    target_ulong mask = BIT(idx % size);
+    target_ulong mask = BIT_ULL(idx % size);
     target_ulong value = set ? mask : 0;
 
     update_spte_info(env, base, SPTE_VALID_MAP + offset,
@@ -1279,7 +1279,7 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
         return false;
     }
 
-    return value & BIT(idx % size);
+    return value & BIT_ULL(idx % size);
 }
 
 static target_ulong spte_get_gpte(CPURISCVState *env, hwaddr base,

@@ -1294,26 +1294,19 @@ static void spte_set_gpte(CPURISCVState *env, hwaddr base, target_ulong gpte,
     set_spte_info(env, base, SPTE_GPTE_PTR, gpte, attrs, res);
 }
 
-static void *spte_map_extra_page(CPURISCVState *env, hwaddr base)
-{
-    CPUState *cs = env_cpu(env);
-    hwaddr l = TARGET_PAGE_SIZE, addr1;
-    MemoryRegion *mr;
-
-    mr = address_space_translate(cs->as, base + SEPTE_OFFSET, &addr1, &l,
-                                 false, MEMTXATTRS_UNSPECIFIED);
-
-    qemu_log_mask(CPU_LOG_SMMU, "SMMU: map extra addr " HWADDR_FMT_plx " at 0x%llx\n", base, (unsigned long long)mr);
-
-    return qemu_map_ram_ptr(mr->ram_block, addr1);
-}
-
 static void posion_spte(CPURISCVState *env, hwaddr base, hwaddr *gbase)
 {
+    CPUState *cs = env_cpu(env);
     int size = TARGET_PAGE_SIZE / riscv_cpu_xlen(env);
+    hwaddr l = 0x400, addr1;
     int opsize = riscv_cpu_xlen(env) / 8;
     int opnum = size / opsize;
-    void *pte = spte_map_extra_page(env, base);
+    MemoryRegion *mr = address_space_translate(cs->as, base + SEPTE_OFFSET,
+                                               &addr1, &l, true,
+                                               MEMTXATTRS_UNSPECIFIED);
+    void *pte = qemu_map_ram_ptr(mr->ram_block, addr1);
+
+    qemu_log_mask(CPU_LOG_SMMU, "SMMU: map extra addr " HWADDR_FMT_plx " at 0x%llx\n", base, (unsigned long long)mr);
 
     // posion the valid map
     for (int i = 0; i < opnum; i++) {

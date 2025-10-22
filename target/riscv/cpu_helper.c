@@ -1245,7 +1245,7 @@ static void spte_set_validmap(CPURISCVState *env, hwaddr base, target_ulong idx,
                               bool set, MemTxAttrs attrs, MemTxResult *res)
 {
     target_ulong size = riscv_cpu_xlen(env);
-    target_ulong offset = (idx & (size - 1)) / 8;
+    target_ulong offset = (idx & (~(size - 1))) / 8;
     target_ulong mask = BIT_ULL(idx % size);
     target_ulong value = set ? mask : 0;
 
@@ -1270,7 +1270,7 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
 {
     target_ulong value;
     unsigned int size = riscv_cpu_xlen(env);
-    unsigned int offset = (idx & (size - 1)) / 8;
+    unsigned int offset = (idx & (~(size - 1))) / 8;
 
     value = get_spte_info(env, base, SPTE_VALID_MAP + offset,
                           attrs, res);

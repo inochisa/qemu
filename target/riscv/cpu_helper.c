@@ -1244,8 +1244,8 @@ static inline void update_spte_info(CPURISCVState *env, hwaddr base,
 static void spte_set_validmap(CPURISCVState *env, hwaddr base, target_ulong idx,
                               bool set, MemTxAttrs attrs, MemTxResult *res)
 {
-    int size = riscv_cpu_xlen(env);
-    int offset = (idx & (size - 1)) / 8;
+    target_ulong size = riscv_cpu_xlen(env);
+    target_ulong offset = (idx & (size - 1)) / 8;
     target_ulong mask = BIT_ULL(idx % size);
     target_ulong value = set ? mask : 0;
 
@@ -1269,8 +1269,8 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
                                 MemTxAttrs attrs, MemTxResult *res)
 {
     target_ulong value;
-    int size = riscv_cpu_xlen(env);
-    int offset = (idx & (size - 1)) / 8;
+    unsigned int size = riscv_cpu_xlen(env);
+    unsigned int offset = (idx & (size - 1)) / 8;
 
     value = get_spte_info(env, base, SPTE_VALID_MAP + offset,
                           attrs, res);
@@ -1278,6 +1278,8 @@ static bool check_spte_is_valid(CPURISCVState *env, hwaddr base, target_ulong id
     if (*res != MEMTX_OK) {
         return false;
     }
+
+    qemu_log_mask(CPU_LOG_SMMU, "SMMU: #" TARGET_FMT_lu ": base " HWADDR_FMT_plx " offset 0x%04x: " TARGET_FMT_lx "\n", idx, base, offset, value);
 
     return value & BIT_ULL(idx % size);
 }

@@ -648,20 +648,14 @@ static void do_spte_flush(CPURISCVState *env, target_ulong flush_asid,
 
     qemu_log_mask(CPU_LOG_SMMU | CPU_LOG_SMA, "SMMU: fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", flush_vaddr, flush_asid);
 
-	if (flush_vaddr != 0) {
-        env->shadow_fence++;
+	if (flush_vaddr == 0) {
+        riscv_cpu_flush_all_valid_map(env, NULL);
+        return;
     }
 
-    riscv_cpu_flush_all_valid_map(env, NULL);
+    riscv_cpu_flush_valid_map(env, base, flush_vaddr, vm);
+
     return;
-
-	// if (flush_vaddr == 0) {
-	// 	riscv_cpu_flush_all_valid_map(env, NULL);
-	// 	return;
-	// }
-
-	// riscv_get_shadow_physical_address(env, NULL, &ret_prot,
-    //                                   (hwaddr)flush_vaddr, NULL, true, false);
 }
 
 

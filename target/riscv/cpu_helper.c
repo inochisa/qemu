@@ -1352,12 +1352,38 @@ void riscv_cpu_flush_all_valid_map(CPURISCVState *env, hwaddr *gbase)
     posion_spte(env, base, gbase);
 }
 
-void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr)
+void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr, int vm)
 {
-    // CPUState *cs = env_cpu(env);
-    // int size;
+    MemTxResult res;
+    MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
+    int levels, ptidxbits;
 
-    // TODO: setup init and call fence
+    if (base == 0) {
+        return;
+    }
+
+    env->shadow_fence++;
+
+    switch (vm) {
+    case VM_1_10_SV32:
+      levels = 2; ptidxbits = 10; break;
+    case VM_1_10_SV39:
+      levels = 3; ptidxbits = 9; break;
+    case VM_1_10_SV48:
+      levels = 4; ptidxbits = 9; break;
+    case VM_1_10_SV57:
+      levels = 5; ptidxbits = 9; break;
+    default:
+      g_assert_not_reached();
+    }
+
+    int ptshift = (levels - 1) * ptidxbits;
+    target_ulong idx = (vaddr >> (PGSHIFT + ptshift)) & ((1 << ptidxbits) - 1);
+
+    spte_set_invalid(env, base, idx, attrs, &res);
+    if (res != MEMTX_OK) {
+        qemu_log_mask(CPU_LOG_SMMU, "Failed to commit fence on base " HWADDR_FMT_plx " vaddr " HWADDR_FMT_plx "/" TARGET_FMT_lu "\n", base, vaddr, idx);
+    }
 }
 
 static void mark_spte_is_huge(CPURISCVState *env, hwaddr addr,

@@ -644,7 +644,7 @@ int riscv_get_shadow_physical_address(CPURISCVState *env,
                                       int levels, int ptidxbits, int ptesize,
                                       bool flush, bool is_debug);
 void riscv_cpu_flush_all_valid_map(CPURISCVState *env, hwaddr *gbase);
-void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr);
+void riscv_cpu_flush_valid_map(CPURISCVState *env, hwaddr base, hwaddr vaddr, int vm);
 void riscv_cpu_flush_spte_gptr(CPURISCVState *env);
 void riscv_cpu_do_interrupt(CPUState *cpu);
 void riscv_isa_write_fdt(RISCVCPU *cpu, void *fdt, char *nodename);

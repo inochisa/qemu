@@ -666,6 +666,8 @@ void helper_gst_spte_flush(CPURISCVState *env, target_ulong asid,
 		return;
 	}
 
+    qemu_log_mask(CPU_LOG_SMMU | CPU_LOG_SMA, "SMMU: foreground fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", vaddr, asid);
+
 	do_spte_flush(env, asid, vaddr, false);
 }
 
@@ -675,6 +677,8 @@ void helper_hyp_spte_flush(CPURISCVState *env, target_ulong asid,
 	if (env->virt_enabled) {
 		return;
 	}
+
+    qemu_log_mask(CPU_LOG_SMMU | CPU_LOG_SMA, "SMMU: background fence flush on " TARGET_FMT_lx "(" TARGET_FMT_lu ")\n", vaddr, asid);
 
 	do_spte_flush(env, asid, vaddr, true);
 }

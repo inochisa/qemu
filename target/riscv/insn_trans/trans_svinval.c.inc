@@ -30,6 +30,11 @@ static bool trans_sinval_vma(DisasContext *ctx, arg_sinval_vma *a)
 #ifndef CONFIG_USER_ONLY
     decode_save_opc(ctx, 0);
     gen_helper_tlb_flush(tcg_env);
+
+    TCGv vaddr = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv asid = get_gpr(ctx, a->rs2, EXT_NONE);
+
+	gen_helper_gst_spte_flush(tcg_env, asid, vaddr);
     return true;
 #endif
     return false;
@@ -59,6 +64,11 @@ static bool trans_hinval_vvma(DisasContext *ctx, arg_hinval_vvma *a)
 #ifndef CONFIG_USER_ONLY
     decode_save_opc(ctx, 0);
     gen_helper_hyp_tlb_flush(tcg_env);
+
+    TCGv vaddr = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv asid = get_gpr(ctx, a->rs2, EXT_NONE);
+
+    gen_helper_hyp_spte_flush(tcg_env, asid, vaddr);
     return true;
 #endif
     return false;
